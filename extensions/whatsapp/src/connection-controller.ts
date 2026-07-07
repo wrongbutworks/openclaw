@@ -44,6 +44,7 @@ export const WHATSAPP_WATCHDOG_TIMEOUT_ERROR = "watchdog-timeout";
 
 type TimerHandle = ReturnType<typeof setInterval>;
 type WaSocket = Awaited<ReturnType<typeof createWaSocket>>;
+type LoginSocketPrepareReason = "initial" | "post-pairing" | "timeout" | "logged-out";
 
 export type ManagedWhatsAppListener = ActiveWebListener & {
   close?: () => Promise<void>;
@@ -231,6 +232,11 @@ export async function waitForWhatsAppLoginResult(params: {
   createSocket?: typeof createWaSocket;
   socketTiming?: WhatsAppSocketTimingOptions;
   onQr?: (qr: string) => void;
+  beforeCreateLoginSocket?: () => void;
+  prepareLoginSocket?: (
+    sock: WaSocket,
+    context: { reason: LoginSocketPrepareReason },
+  ) => Promise<void>;
   onSocketReplaced?: (sock: WaSocket) => void;
 }): Promise<WhatsAppLoginWaitResult> {
   const wait = params.waitForConnection ?? waitForWaConnection;
@@ -239,6 +245,7 @@ export async function waitForWhatsAppLoginResult(params: {
   let postPairingRestarted = false;
   let timeoutRestarted = false;
   let loggedOutRestarted = false;
+  let prepareReason: LoginSocketPrepareReason = "initial";
 
   const replaceLoginSocket = async (
     opts: { closeCurrent?: boolean } = {},
@@ -247,6 +254,7 @@ export async function waitForWhatsAppLoginResult(params: {
       closeWaSocket(currentSock);
     }
     try {
+      params.beforeCreateLoginSocket?.();
       currentSock = await createSocket(false, params.verbose, {
         authDir: params.authDir,
         ...params.socketTiming,
@@ -266,6 +274,7 @@ export async function waitForWhatsAppLoginResult(params: {
 
   while (true) {
     try {
+      await params.prepareLoginSocket?.(currentSock, { reason: prepareReason });
       await wait(currentSock, { timeout: "none" });
       // Socket open only proves in-memory auth; require persisted creds before success.
       const persistedAuth = await readWebAuthExistsForDecision(params.authDir);
@@ -300,6 +309,7 @@ export async function waitForWhatsAppLoginResult(params: {
         } else {
           timeoutRestarted = true;
         }
+        prepareReason = restartKind;
         params.runtime.log(info(getLoginSocketRestartMessage(restartKind)));
         const replacementFailure = await replaceLoginSocket();
         if (replacementFailure) {
@@ -341,6 +351,7 @@ export async function waitForWhatsAppLoginResult(params: {
           }
         }
         loggedOutRestarted = true;
+        prepareReason = "logged-out";
         const replacementFailure = await replaceLoginSocket({ closeCurrent: false });
         if (replacementFailure) {
           return replacementFailure;
