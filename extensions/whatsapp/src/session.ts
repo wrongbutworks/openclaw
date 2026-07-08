@@ -1,7 +1,7 @@
 // Whatsapp plugin module implements session behavior.
 import { randomUUID } from "node:crypto";
 import type { Agent } from "node:https";
-import type { GroupMetadata, WAMessageKey, proto } from "baileys";
+import type { GroupMetadata, WABrowserDescription, WAMessageKey, proto } from "baileys";
 import { formatCliCommand } from "openclaw/plugin-sdk/cli-runtime";
 import { VERSION } from "openclaw/plugin-sdk/cli-runtime";
 import {
@@ -29,6 +29,7 @@ import {
 import { renderQrTerminal } from "./qr-terminal.js";
 import { getStatusCode } from "./session-errors.js";
 import {
+  Browsers,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   makeWASocket,
@@ -68,6 +69,8 @@ const LOGGED_OUT_STATUS = 401;
 const WHATSAPP_WEBSOCKET_PROXY_TARGET = "https://mmg.whatsapp.net/";
 const CREDS_FLUSH_TIMEOUT_MESSAGE =
   "Queued WhatsApp creds save did not finish before auth bootstrap; skipping repair and continuing with primary creds.";
+const OPENCLAW_WHATSAPP_BROWSER: WABrowserDescription = ["openclaw", "cli", VERSION];
+export const WHATSAPP_PHONE_CODE_BROWSER: WABrowserDescription = Browsers.macOS("Chrome");
 export const OPENCLAW_WHATSAPP_WEB_SOCKET_URL_ENV = "OPENCLAW_WHATSAPP_WEB_SOCKET_URL";
 
 async function rejectUnsafeWebCredsPath(authDir: string): Promise<void> {
@@ -163,6 +166,7 @@ export async function createWaSocket(
     getMessage?: (key: WAMessageKey) => Promise<proto.IMessage | undefined>;
     cachedGroupMetadata?: (jid: string) => Promise<GroupMetadata | undefined>;
     waWebSocketUrl?: string | URL;
+    browser?: WABrowserDescription;
   } & WhatsAppSocketTimingOptions = {},
 ): Promise<ReturnType<typeof makeWASocket>> {
   const baseLogger = getChildLogger(
@@ -207,7 +211,7 @@ export async function createWaSocket(
     version,
     logger,
     printQRInTerminal: false,
-    browser: ["openclaw", "cli", VERSION],
+    browser: opts.browser ?? OPENCLAW_WHATSAPP_BROWSER,
     syncFullHistory: false,
     markOnlineOnConnect: false,
     ...socketTiming,
