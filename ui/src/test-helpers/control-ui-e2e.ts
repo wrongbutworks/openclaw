@@ -45,6 +45,7 @@ export type MockGatewayRequest = {
 export type ControlUiMockGatewayScenario = {
   assistantAgentId?: string;
   assistantName?: string;
+  basePath?: string;
   controlUiTabs?: Array<{
     group?: string;
     icon?: string;
@@ -95,6 +96,7 @@ export type MockGatewayControls = {
   ) => Promise<void>;
   resolveDeferred: (method: string, payload?: unknown) => Promise<void>;
   setOnline: (online: boolean) => Promise<void>;
+  setMethodResponse: (method: string, payload: unknown) => Promise<void>;
   setHistoryMessages: (messages: unknown[]) => Promise<void>;
   setMethodResponse: (method: string, payload: unknown) => Promise<void>;
   waitForRequest: (method: string) => Promise<MockGatewayRequest>;
@@ -224,9 +226,20 @@ function normalizeScenario(
 ): NormalizedControlUiMockGatewayScenario {
   const defaultAgentId = scenario.defaultAgentId?.trim() || "main";
   const sessionKey = scenario.sessionKey?.trim() || "main";
+  const basePathValue = scenario.basePath?.trim() ?? "";
+  const basePathWithSlash = basePathValue
+    ? basePathValue.startsWith("/")
+      ? basePathValue
+      : `/${basePathValue}`
+    : "";
+  const basePath =
+    basePathWithSlash.length > 1 && basePathWithSlash.endsWith("/")
+      ? basePathWithSlash.slice(0, -1)
+      : basePathWithSlash;
   return {
     assistantAgentId: scenario.assistantAgentId?.trim() || defaultAgentId,
     assistantName: scenario.assistantName?.trim() || "OpenClaw",
+    basePath,
     controlUiTabs: scenario.controlUiTabs ?? [],
     defaultAgentId,
     deferredMethods: scenario.deferredMethods ?? [],
@@ -250,7 +263,7 @@ export function createControlUiMockBootstrapConfig(scenario: ControlUiMockGatewa
     assistantAgentId: normalizedScenario.assistantAgentId,
     assistantAvatar: "",
     assistantName: normalizedScenario.assistantName,
-    basePath: "/",
+    basePath: normalizedScenario.basePath,
     devGitBranch: normalizedScenario.devGitBranch || undefined,
     embedSandbox: "scripts",
     localMediaPreviewRoots: [],
@@ -307,17 +320,32 @@ function installControlUiMockGateway(input: {
     requests: BrowserRequest[];
     resolveDeferred: (method: string, payload?: unknown) => void;
     setOnline: (online: boolean) => void;
+    setMethodResponse: (method: string, payload: unknown) => void;
     setHistoryMessages: (messages: unknown[]) => void;
     setMethodResponse: (method: string, payload: unknown) => void;
     socketCount: () => number;
     socketUrls: () => string[];
   };
   type WindowWithGateway = Window & {
+    __OPENCLAW_CONTROL_UI_BASE_PATH__?: string;
     openclawControlUiE2eGateway?: ExposedGateway;
   };
 
   const scenario: BrowserScenario = input.scenario;
+  (window as unknown as WindowWithGateway)["__OPENCLAW_CONTROL_UI_BASE_PATH__"] = scenario.basePath;
   const protocolVersion = input.protocolVersion;
+  const methodResponseOverridesStorageKey = "openclaw.control-ui-e2e.method-responses.v1";
+  const methodResponseOverrides: Record<string, unknown> = {};
+  try {
+    const storedOverrides = window.sessionStorage.getItem(methodResponseOverridesStorageKey);
+    const parsedOverrides = storedOverrides ? (JSON.parse(storedOverrides) as unknown) : null;
+    if (isRecord(parsedOverrides)) {
+      Object.assign(methodResponseOverrides, parsedOverrides);
+      Object.assign(scenario.methodResponses, parsedOverrides);
+    }
+  } catch {
+    // Opaque initial documents may not expose storage; the target page will.
+  }
   const deferredMethods: string[] = [...scenario.deferredMethods];
   const deferredResponses: DeferredResponse[] = [];
   const requests: BrowserRequest[] = [];
@@ -897,6 +925,17 @@ function installControlUiMockGateway(input: {
         return;
       }
       MockWebSocket.latest?.openConnection();
+    setMethodResponse(method, payload) {
+      scenario.methodResponses[method] = payload;
+      methodResponseOverrides[method] = payload;
+      try {
+        window.sessionStorage.setItem(
+          methodResponseOverridesStorageKey,
+          JSON.stringify(methodResponseOverrides),
+        );
+      } catch {
+        // Current-document responses still work if browser storage is unavailable.
+      }
     },
     setHistoryMessages(messages) {
       scenario.historyMessages = Array.isArray(messages) ? messages : [];
@@ -916,7 +955,7 @@ function installControlUiMockGateway(input: {
     },
   };
 
-  (window as WindowWithGateway).openclawControlUiE2eGateway = exposed;
+  (window as unknown as WindowWithGateway).openclawControlUiE2eGateway = exposed;
   window.WebSocket = MockWebSocket as unknown as typeof WebSocket;
 }
 
@@ -1115,6 +1154,23 @@ function createMockGatewayControls(page: Page, defaultSessionKey: string): MockG
         }
         gateway.setOnline(nextOnline);
       }, online);
+    async setMethodResponse(method, payload) {
+      await page.evaluate(
+        ({ targetMethod, responsePayload }) => {
+          const gateway = (
+            window as Window & {
+              openclawControlUiE2eGateway?: {
+                setMethodResponse: (method: string, payload: unknown) => void;
+              };
+            }
+          ).openclawControlUiE2eGateway;
+          if (!gateway) {
+            throw new Error("Mock Gateway is not installed");
+          }
+          gateway.setMethodResponse(targetMethod, responsePayload);
+        },
+        { targetMethod: method, responsePayload: payload },
+      );
     },
     async setHistoryMessages(messages) {
       await page.evaluate((nextMessages) => {
