@@ -306,6 +306,8 @@ export const CORE_GATEWAY_METHOD_SPECS: readonly CoreGatewayMethodSpec[] = [
   // Session checkout diff reads the session's own git worktree, matching the
   // sessions.files.* trusted-operator read domain.
   { name: "sessions.diff", scope: "operator.read" },
+  { name: "approval.get", scope: "operator.approvals" },
+  { name: "approval.resolve", scope: "operator.approvals" },
 ] as const;
 
 const CORE_GATEWAY_METHOD_SPEC_BY_NAME: ReadonlyMap<string, CoreGatewayMethodSpec> = new Map(
