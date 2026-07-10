@@ -342,7 +342,6 @@ function normalizePresentationAction(raw: unknown): MessagePresentationAction | 
     const decision = record.decision;
     if (
       typeof approvalId !== "string" ||
-      approvalId !== approvalId.trim() ||
       !isWellFormedApprovalId(approvalId) ||
       (approvalKind !== "exec" && approvalKind !== "plugin") ||
       (decision !== "allow-once" && decision !== "allow-always" && decision !== "deny")
