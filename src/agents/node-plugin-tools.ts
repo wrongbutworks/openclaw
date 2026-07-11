@@ -1,5 +1,10 @@
 /** Materializes connected node-hosted plugin tools for agent runs. */
 import { listConnectedNodePluginTools } from "../gateway/node-plugin-tool-snapshot.js";
+import {
+  NODE_MCP_TOOL_CALL_GATEWAY_TIMEOUT_MS,
+  NODE_MCP_TOOL_CALL_TIMEOUT_MS,
+  NODE_MCP_TOOLS_CALL_COMMAND,
+} from "../infra/node-commands.js";
 import { setPluginToolMeta } from "../plugins/tools.js";
 import { sanitizeServerName } from "./agent-bundle-mcp-names.js";
 import { compileGlobPatterns, matchesAnyGlobPattern } from "./glob-pattern.js";
@@ -27,6 +32,38 @@ function isAgentToolResult(value: unknown): value is AgentToolResult<unknown> {
 
 function readNodeInvokePayload(value: unknown): unknown {
   return isRecord(value) && "payload" in value ? value.payload : value;
+}
+
+function mapMcpPayloadToAgentToolResult(payload: unknown): AgentToolResult<unknown> {
+  if (!isRecord(payload)) {
+    return jsonResult(payload);
+  }
+  const rawContent = Array.isArray(payload.content) ? payload.content : [];
+  const content: AgentToolResult<unknown>["content"] = [];
+  for (const block of rawContent) {
+    if (!isRecord(block)) {
+      continue;
+    }
+    if (block.type === "text" && typeof block.text === "string") {
+      content.push({ type: "text", text: block.text });
+    } else if (
+      block.type === "image" &&
+      typeof block.data === "string" &&
+      typeof block.mimeType === "string"
+    ) {
+      content.push({ type: "image", data: block.data, mimeType: block.mimeType });
+    }
+  }
+  const structuredText = isRecord(payload.structuredContent)
+    ? JSON.stringify(payload.structuredContent, null, 2)
+    : "";
+  if (structuredText) {
+    content.push({ type: "text", text: structuredText });
+  }
+  return {
+    content,
+    details: payload,
+  };
 }
 
 function normalizePolicyNames(values: readonly string[] | undefined): Set<string> {
@@ -175,6 +212,7 @@ export function createNodePluginTools(params: {
       continue;
     }
     existingNormalized.add(normalizeToolName(toolName));
+    const mcpTool = descriptor.command === NODE_MCP_TOOLS_CALL_COMMAND ? descriptor.mcp : undefined;
     const tool: AnyAgentTool = {
       name: toolName,
       label: toolName,
@@ -184,19 +222,30 @@ export function createNodePluginTools(params: {
         nodeId: entry.nodeId,
       }),
       parameters: descriptor.parameters as never,
+      ...(mcpTool ? { executionMode: "sequential" as const } : {}),
       execute: async (toolCallId, toolParams) => {
         const raw = await callGatewayTool(
           "node.invoke",
-          {},
+          mcpTool ? { timeoutMs: NODE_MCP_TOOL_CALL_GATEWAY_TIMEOUT_MS } : {},
           {
             nodeId: entry.nodeId,
             command: entry.command,
-            params: toolParams,
+            params: mcpTool
+              ? {
+                  server: mcpTool.server,
+                  tool: mcpTool.tool,
+                  arguments: toolParams,
+                }
+              : toolParams,
+            ...(mcpTool ? { timeoutMs: NODE_MCP_TOOL_CALL_TIMEOUT_MS } : {}),
             idempotencyKey: toolCallId,
           },
           { scopes: ["operator.write"] },
         );
         const payload = readNodeInvokePayload(raw);
+        if (mcpTool) {
+          return mapMcpPayloadToAgentToolResult(payload);
+        }
         return isAgentToolResult(payload) ? payload : jsonResult(payload);
       },
     };

@@ -17,7 +17,11 @@ import { loadOrCreateDeviceIdentity } from "../infra/device-identity.js";
 import type { SkillBinTrustEntry } from "../infra/exec-approvals.js";
 import { resolveExecutableFromPathEnv } from "../infra/executable-path.js";
 import { getMachineDisplayName } from "../infra/machine-name.js";
-import { NODE_EXEC_APPROVALS_COMMANDS, NODE_SYSTEM_RUN_COMMANDS } from "../infra/node-commands.js";
+import {
+  NODE_EXEC_APPROVALS_COMMANDS,
+  NODE_MCP_TOOLS_CALL_COMMAND,
+  NODE_SYSTEM_RUN_COMMANDS,
+} from "../infra/node-commands.js";
 import { ensureOpenClawCliOnPath } from "../infra/path-env.js";
 import { VERSION } from "../version.js";
 import { ensureNodeHostConfig, saveNodeHostConfig, type NodeHostGatewayConfig } from "./config.js";
@@ -27,6 +31,11 @@ import {
   buildNodeInvokeResultParams,
   handleInvoke,
 } from "./invoke.js";
+import {
+  countConfiguredNodeHostMcpServers,
+  startNodeHostMcpManager,
+  type NodeHostMcpManager,
+} from "./mcp.js";
 import {
   ensureNodeHostPluginRegistry,
   listRegisteredNodeHostCapsAndCommands,
@@ -89,7 +98,7 @@ const NODE_HOST_EXIT_ON_RECONNECT_PAUSE_CODES: ReadonlySet<string> = new Set([
 
 type NodeHostReconnectPausedDeps = {
   writeLine?: (message: string) => void;
-  exit?: (code: number) => never;
+  exit?: (code: number) => void;
 };
 
 export function shouldExitNodeHostOnReconnectPaused(detailCode: string | null): boolean {
@@ -297,6 +306,33 @@ export async function runNodeHost(opts: NodeHostRunOptions): Promise<void> {
     : "";
   const url = `${scheme}://${host}:${port}${contextPath}`;
   const pathEnv = ensureNodePathEnv();
+  const mcpServers = cfg.nodeHost?.mcp?.servers;
+  const hasMcpServers = countConfiguredNodeHostMcpServers(mcpServers) > 0;
+  const mcpStartupAbort = new AbortController();
+  const mcpRuntime: {
+    manager?: NodeHostMcpManager;
+    startup?: Promise<NodeHostMcpManager>;
+  } = {};
+  let gatewayHelloReceived = false;
+
+  const publishNodeToolsWhenReady = () => {
+    if (!gatewayHelloReceived || !mcpRuntime.manager) {
+      return;
+    }
+    const nodePluginTools = [
+      ...pluginNodeHost.nodePluginTools,
+      ...mcpRuntime.manager.descriptors,
+    ].toSorted(
+      (left, right) =>
+        left.pluginId.localeCompare(right.pluginId) || left.name.localeCompare(right.name),
+    );
+    void publishNodePluginTools(client, nodePluginTools);
+  };
+  const closeMcpRuntime = async () => {
+    mcpStartupAbort.abort();
+    const manager = mcpRuntime.manager ?? (await mcpRuntime.startup?.catch(() => undefined));
+    await manager?.close();
+  };
 
   const client = new GatewayClient({
     url,
@@ -312,10 +348,11 @@ export async function runNodeHost(opts: NodeHostRunOptions): Promise<void> {
     mode: GATEWAY_CLIENT_MODES.NODE,
     role: "node",
     scopes: [],
-    caps: ["system", ...pluginNodeHost.caps],
+    caps: ["system", ...(hasMcpServers ? ["mcp"] : []), ...pluginNodeHost.caps],
     commands: [
       ...NODE_SYSTEM_RUN_COMMANDS,
       ...NODE_EXEC_APPROVALS_COMMANDS,
+      ...(hasMcpServers ? [NODE_MCP_TOOLS_CALL_COMMAND] : []),
       ...pluginNodeHost.commands,
     ],
     pathEnv,
@@ -330,18 +367,31 @@ export async function runNodeHost(opts: NodeHostRunOptions): Promise<void> {
       if (!payload) {
         return;
       }
-      void handleInvoke(payload, client, skillBins);
+      void handleInvoke(payload, client, skillBins, mcpRuntime.manager);
     },
     onHelloOk: () => {
       writeStderrLine(`node host gateway connected: ${url}`);
-      void publishNodePluginTools(client, pluginNodeHost.nodePluginTools);
+      gatewayHelloReceived = true;
+      if (mcpRuntime.manager) {
+        publishNodeToolsWhenReady();
+      } else {
+        // Do not make existing plugin tools wait for optional MCP discovery.
+        void publishNodePluginTools(client, pluginNodeHost.nodePluginTools);
+      }
     },
     onConnectError: (err) => {
       // keep retrying (handled by GatewayClient)
       writeStderrLine(`node host gateway connect failed: ${err.message}`);
     },
     onReconnectPaused: (info) => {
-      handleNodeHostReconnectPaused(info);
+      handleNodeHostReconnectPaused(info, {
+        exit: (code) => {
+          client.stop();
+          // Terminal auth/version pauses restart under a supervisor; close MCP
+          // subprocesses first so restart loops cannot orphan server processes.
+          void closeMcpRuntime().finally(() => process.exit(code));
+        },
+      });
     },
     onClose: (code, reason) => {
       writeStderrLine(`node host gateway closed (${code}): ${reason}`);
@@ -354,11 +404,52 @@ export async function runNodeHost(opts: NodeHostRunOptions): Promise<void> {
     return bins;
   }, pathEnv);
 
-  const readiness = await startGatewayClientWhenEventLoopReady(client, {
+  let stopping = false;
+  let resolveStopped: (() => void) | undefined;
+  const stopped = new Promise<void>((resolve) => {
+    resolveStopped = resolve;
+  });
+  const removeSignalHandlers = () => {
+    process.off("SIGINT", onSigint);
+    process.off("SIGTERM", onSigterm);
+  };
+  const finish = async (exitCode: number) => {
+    if (stopping) {
+      return;
+    }
+    stopping = true;
+    removeSignalHandlers();
+    client.stop();
+    await closeMcpRuntime();
+    process.exitCode = exitCode;
+    resolveStopped?.();
+  };
+  const onSigint = () => void finish(130);
+  const onSigterm = () => void finish(143);
+  process.once("SIGINT", onSigint);
+  process.once("SIGTERM", onSigterm);
+
+  const readinessPromise = startGatewayClientWhenEventLoopReady(client, {
     clientOptions: { preauthHandshakeTimeoutMs: cfg.gateway?.handshakeTimeoutMs },
   });
+  // Gateway startup begins first; optional MCP discovery must not delay core node availability.
+  mcpRuntime.startup = startNodeHostMcpManager(mcpServers, { signal: mcpStartupAbort.signal }).then(
+    (manager) => {
+      mcpRuntime.manager = manager;
+      publishNodeToolsWhenReady();
+      return manager;
+    },
+  );
+  const readiness = await readinessPromise;
   if (!readiness.ready) {
+    if (stopping) {
+      await stopped;
+      return;
+    }
+    removeSignalHandlers();
+    client.stop();
+    await closeMcpRuntime();
     throw new Error("node host gateway event loop readiness timeout");
   }
-  await new Promise(() => {});
+  await stopped;
 }

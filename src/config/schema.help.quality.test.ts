@@ -204,6 +204,8 @@ const TARGET_KEYS = [
   "nodeHost.browserProxy",
   "nodeHost.browserProxy.enabled",
   "nodeHost.browserProxy.allowProfiles",
+  "nodeHost.mcp",
+  "nodeHost.mcp.servers",
   "media",
   "media.preserveFilenames",
   "audio",

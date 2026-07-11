@@ -410,6 +410,8 @@ export const FIELD_LABELS: Record<string, string> = {
   "nodeHost.browserProxy": "Node Browser Proxy",
   "nodeHost.browserProxy.enabled": "Node Browser Proxy Enabled",
   "nodeHost.browserProxy.allowProfiles": "Node Browser Proxy Allowed Profiles",
+  "nodeHost.mcp": "Node Host MCP",
+  "nodeHost.mcp.servers": "Node Host MCP Servers",
   media: "Media",
   "media.preserveFilenames": "Preserve Media Filenames",
   "media.ttlHours": "Media Retention TTL (hours)",

@@ -399,6 +399,33 @@ describe("gateway/node-command-policy", () => {
     expect(allowlist.has("system.run")).toBe(true);
   });
 
+  it("allows approved node-host MCP calls while denyCommands still wins", () => {
+    const node = {
+      platform: "linux",
+      deviceFamily: "Linux",
+      commands: ["mcp.tools.call.v1"],
+      approvedCommands: ["mcp.tools.call.v1"],
+    };
+    const allowlist = resolveNodeCommandAllowlist({} as OpenClawConfig, node);
+    expect(
+      resolveNodePairingCommandAllowlist({} as OpenClawConfig, node).has("mcp.tools.call.v1"),
+    ).toBe(true);
+    expect(allowlist.has("mcp.tools.call.v1")).toBe(true);
+    expect(
+      isNodeCommandAllowed({
+        command: "mcp.tools.call.v1",
+        declaredCommands: node.commands,
+        allowlist,
+      }),
+    ).toEqual({ ok: true });
+
+    const denied = resolveNodeCommandAllowlist(
+      { gateway: { nodes: { denyCommands: ["mcp.tools.call.v1"] } } } as OpenClawConfig,
+      node,
+    );
+    expect(denied.has("mcp.tools.call.v1")).toBe(false);
+  });
+
   it("does not treat unconnected declared host commands as approved", () => {
     const allowlist = resolveNodeCommandAllowlist({} as OpenClawConfig, {
       platform: "linux",

@@ -33,6 +33,13 @@ goes through `node.invoke`, so disconnecting the node removes the tool from new
 agent runs. Gateway operators can disable publication with
 `gateway.nodes.pluginTools.enabled: false`.
 
+For declarative MCP tools, add the normal MCP server shape under
+`nodeHost.mcp.servers` in `openclaw.json` on the node machine, then restart the
+node host. The node declares the approval-gated `mcp.tools.call.v1` command
+family and publishes listed tools after connecting; changing the server list
+later does not require re-pairing. See
+[Node-hosted MCP servers](/nodes#node-hosted-mcp-servers).
+
 ## Browser proxy (zero-config)
 
 Node hosts automatically advertise a browser proxy if `browser.enabled` is not

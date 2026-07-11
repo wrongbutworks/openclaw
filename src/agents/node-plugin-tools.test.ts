@@ -73,6 +73,56 @@ describe("createNodePluginTools", () => {
     expect(result.content).toEqual([{ type: "text", text: "pong" }]);
   });
 
+  it("wraps node-host MCP arguments and maps MCP content", async () => {
+    replaceConnectedNodePluginTools({
+      nodeId: "node-1",
+      tools: [
+        {
+          pluginId: "node-mcp",
+          name: "docs_search",
+          description: "Search node-local docs",
+          command: "mcp.tools.call.v1",
+          mcp: { server: "docs", tool: "search" },
+        },
+      ],
+    });
+    vi.mocked(callGatewayTool).mockResolvedValueOnce({
+      payload: {
+        content: [
+          { type: "image", data: "aW1hZ2UtMQ==", mimeType: "image/png" },
+          { type: "text", text: "first" },
+          { type: "text", text: "second" },
+          { type: "image", data: "aW1hZ2UtMg==", mimeType: "image/png" },
+        ],
+        structuredContent: { hits: 2 },
+      },
+    });
+
+    const tool = createNodePluginTools({})[0];
+    const result = await tool.execute("call-mcp", { query: "needle" });
+
+    expect(callGatewayTool).toHaveBeenCalledWith(
+      "node.invoke",
+      { timeoutMs: 125_000 },
+      {
+        nodeId: "node-1",
+        command: "mcp.tools.call.v1",
+        params: { server: "docs", tool: "search", arguments: { query: "needle" } },
+        timeoutMs: 120_000,
+        idempotencyKey: "call-mcp",
+      },
+      { scopes: ["operator.write"] },
+    );
+    expect(tool.executionMode).toBe("sequential");
+    expect(result.content).toEqual([
+      { type: "image", data: "aW1hZ2UtMQ==", mimeType: "image/png" },
+      { type: "text", text: "first" },
+      { type: "text", text: "second" },
+      { type: "image", data: "aW1hZ2UtMg==", mimeType: "image/png" },
+      { type: "text", text: '{\n  "hits": 2\n}' },
+    ]);
+  });
+
   it("disambiguates node tools that collide with existing tool names", () => {
     replaceConnectedNodePluginTools({
       nodeId: "node-1",

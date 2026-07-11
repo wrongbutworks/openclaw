@@ -42,19 +42,6 @@ const BrowserSnapshotDefaultsSchema = z
   .strict()
   .optional();
 
-const NodeHostSchema = z
-  .object({
-    browserProxy: z
-      .object({
-        enabled: z.boolean().optional(),
-        allowProfiles: z.array(z.string()).optional(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict()
-  .optional();
-
 type ConfigSchemaShape<T extends object> = {
   [Key in keyof T]-?: z.ZodType<T[Key]>;
 };
@@ -384,7 +371,7 @@ const TalkSchema = z
     }
   });
 
-const McpServerSchema = z
+export const McpServerSchema = z
   .object({
     enabled: z.boolean().optional(),
     command: z.string().optional(),
@@ -473,6 +460,32 @@ const McpConfigSchema = z
   .object({
     servers: z.record(z.string(), McpServerSchema).optional(),
     sessionIdleTtlMs: z.number().finite().min(0).optional(),
+  })
+  .strict()
+  .optional();
+
+const NodeHostMcpServerNameSchema = z
+  .string()
+  .refine(
+    (value) => value.length > 0 && value === value.trim(),
+    "MCP server name must be non-empty and must not have surrounding whitespace",
+  );
+
+const NodeHostSchema = z
+  .object({
+    browserProxy: z
+      .object({
+        enabled: z.boolean().optional(),
+        allowProfiles: z.array(z.string()).optional(),
+      })
+      .strict()
+      .optional(),
+    mcp: z
+      .object({
+        servers: z.record(NodeHostMcpServerNameSchema, McpServerSchema).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .optional();
