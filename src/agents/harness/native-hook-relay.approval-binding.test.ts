@@ -11,6 +11,8 @@ vi.mock("../tools/gateway.js", async (importOriginal) => ({
 const mockCallGatewayTool = vi.mocked(callGatewayTool);
 
 afterEach(() => {
+  // restoreAllMocks does not clear call history on module-mock vi.fn()s.
+  mockCallGatewayTool.mockReset();
   vi.restoreAllMocks();
   testing.clearNativeHookRelaysForTests();
 });
