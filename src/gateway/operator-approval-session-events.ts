@@ -4,6 +4,7 @@ import type {
   SessionApprovalReplay,
 } from "../../packages/gateway-protocol/src/index.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
+import { resolveApprovalSourceStreamKey } from "./approval-session-audience.js";
 import { normalizeControlUiBasePath } from "./control-ui-shared.js";
 import type { OperatorApprovalLifecycleEvent } from "./exec-approval-manager.js";
 import { canAccessOperatorApproval } from "./operator-approval-authorization.js";
@@ -76,6 +77,12 @@ export function createOperatorApprovalSessionEventRuntime(params: {
     if (!approval || event.record.audienceSessionKeys.length === 0) {
       return;
     }
+    // Storage keeps the bare "global" sentinel, but subscribers only know the
+    // agent-scoped stream keys used for audiences; publish the same form so
+    // parents can correlate the event with a stream key they subscribed to.
+    const sourceStreamKey = event.record.source.sessionKey
+      ? resolveApprovalSourceStreamKey(event.record.source.sessionKey, event.record.source.agentId)
+      : null;
     for (const sessionKey of event.record.audienceSessionKeys) {
       const recipients = authorizedRecipients(sessionKey, event.record);
       if (recipients.size === 0) {
@@ -83,9 +90,7 @@ export function createOperatorApprovalSessionEventRuntime(params: {
       }
       const common = {
         sessionKey,
-        ...(event.record.source.sessionKey
-          ? { sourceSessionKey: event.record.source.sessionKey }
-          : {}),
+        ...(sourceStreamKey ? { sourceSessionKey: sourceStreamKey } : {}),
         updatedAtMs: event.record.updatedAtMs,
       };
       let payload: SessionApprovalEvent;

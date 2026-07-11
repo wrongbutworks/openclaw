@@ -284,6 +284,43 @@ describe("operator approval session events", () => {
     expect(serialized).not.toContain("private-runtime-epoch");
   });
 
+  it("publishes the agent-scoped stream key for global-scope sources", () => {
+    const client = createClient({ connId: "admin", scopes: ["operator.admin"] });
+    const { broadcastToConnIds, runtime, subscribers } = createRuntime({ clients: [client] });
+    subscribers.subscribe("admin", "agent:main:global", { includeApprovals: true });
+
+    // Storage records the bare "global" sentinel; subscribers only know the
+    // agent-scoped stream key, so the published event must carry that form.
+    const pending = createPendingRecord({
+      sourceSessionKey: "global",
+      audienceSessionKeys: ["agent:main:global"],
+    });
+    runtime.publish({ phase: "pending", record: pending });
+    runtime.publish({ phase: "terminal", record: createTerminalRecord(pending) });
+
+    expect(broadcastToConnIds).toHaveBeenCalledTimes(2);
+    expect(broadcastToConnIds).toHaveBeenNthCalledWith(
+      1,
+      "session.approval",
+      expect.objectContaining({
+        sessionKey: "agent:main:global",
+        sourceSessionKey: "agent:main:global",
+        phase: "pending",
+      }),
+      new Set(["admin"]),
+    );
+    expect(broadcastToConnIds).toHaveBeenNthCalledWith(
+      2,
+      "session.approval",
+      expect.objectContaining({
+        sessionKey: "agent:main:global",
+        sourceSessionKey: "agent:main:global",
+        phase: "terminal",
+      }),
+      new Set(["admin"]),
+    );
+  });
+
   it("publishes terminal state and rejects lifecycle phases inconsistent with durable status", () => {
     const client = createClient({ connId: "admin", scopes: ["operator.admin"] });
     const { broadcastToConnIds, runtime, subscribers } = createRuntime({ clients: [client] });
