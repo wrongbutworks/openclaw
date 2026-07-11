@@ -159,6 +159,19 @@ describe("resolveApprovalSessionAudienceFromSources", () => {
   });
 });
 
+describe("resolveApprovalSourceStreamKey fallback scoping", () => {
+  it("scopes raw fallback aliases to the raising agent", () => {
+    expect(resolveApprovalSourceStreamKey("child", "work")).toBe("agent:work:child");
+    expect(resolveApprovalSourceStreamKey("GLOBAL", "work")).toBe("agent:work:global");
+  });
+
+  it("keeps agent-scoped, unknown, and agent-less keys exact", () => {
+    expect(resolveApprovalSourceStreamKey("agent:other:child", "work")).toBe("agent:other:child");
+    expect(resolveApprovalSourceStreamKey("unknown", "work")).toBe("unknown");
+    expect(resolveApprovalSourceStreamKey("child", null)).toBe("child");
+  });
+});
+
 describe("resolveApprovalSessionAudience runtime scoping", () => {
   it("scopes unscoped source aliases to the raising agent", () => {
     expect(resolveApprovalSessionAudience("child", "work")).toEqual(["agent:work:child"]);

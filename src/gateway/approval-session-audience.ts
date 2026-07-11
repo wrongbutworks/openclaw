@@ -169,7 +169,16 @@ export function resolveApprovalSourceStreamKey(
   sourceAgentId?: string | null,
 ): string {
   const normalizedSessionKey = sourceSessionKey.trim();
-  return normalizedSessionKey === "global" && sourceAgentId
-    ? `agent:${normalizeAgentId(sourceAgentId)}:global`
-    : normalizedSessionKey;
+  const lowered = normalizedSessionKey.toLowerCase();
+  // Subscribers only know agent-scoped stream keys, so raw fallback inputs
+  // (bare "global", "main", unscoped child aliases) must scope to the raising
+  // agent or the persisted audience is unreachable exactly when lineage
+  // lookup already failed. "unknown" has no stream and stays bare.
+  if (!sourceAgentId || lowered === "unknown" || parseAgentSessionKey(normalizedSessionKey)) {
+    return normalizedSessionKey;
+  }
+  const agentId = normalizeAgentId(sourceAgentId);
+  return lowered === "global"
+    ? `agent:${agentId}:global`
+    : `agent:${agentId}:${normalizedSessionKey}`;
 }
