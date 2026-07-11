@@ -817,7 +817,93 @@ class GatewayExecApprovalRuntimeTest {
       assertEquals("A prior response already denied this approval.", runtime.execApprovalsNotice.value?.message)
       assertEquals("approval-1", runtime.execApprovalsNotice.value?.approvalId)
 
-      runtime.dismissExecApprovalsNotice()
+      runtime.dismissExecApprovalsNotice(requireNotNull(runtime.execApprovalsNotice.value))
+      assertNull(runtime.execApprovalsNotice.value)
+    }
+
+  @Test
+  fun unrelatedApprovalWriteKeepsUnacknowledgedTerminalNotice() =
+    runBlocking {
+      val runtime = createTestRuntime()
+      seedConnectedRuntime(runtime, unifiedMethods)
+      seedApprovals(
+        runtime,
+        listOf(
+          approvalSummary(id = "approval-1", commandText = "echo losing"),
+          approvalSummary(id = "approval-2", commandText = "echo unrelated"),
+        ),
+      )
+      runtime.gatewayDataRequestOverrideForTests = { _, method, params ->
+        check(method == "approval.resolve")
+        val request = Json.parseToJsonElement(requireNotNull(params)).jsonObject
+        when (val id = request["id"]?.jsonPrimitive?.content) {
+          "approval-1" -> unifiedResolve(applied = false, status = "denied", decision = "deny")
+          "approval-2" ->
+            throw GatewayRequestRejected(
+              GatewaySession.ErrorShape(code = "UNAVAILABLE", message = "resolve failed"),
+            )
+          else -> error("unexpected approval id $id")
+        }
+      }
+
+      runtime.resolveExecApproval("approval-1", "allow-once")
+      waitUntil { runtime.execApprovals.value.map { it.id } == listOf("approval-2") }
+      assertEquals("approval-1", runtime.execApprovalsNotice.value?.approvalId)
+
+      runtime.resolveExecApproval("approval-2", "deny")
+      waitUntil {
+        runtime.execApprovals.value.singleOrNull()?.let { row ->
+          row.id == "approval-2" &&
+            row.resolvingDecision == null &&
+            row.errorText == "Could not resolve approval. Refresh and try again."
+        } == true
+      }
+
+      // Starting (and failing) a write for approval-2 must not clear the unacknowledged
+      // losing outcome for approval-1; only the user or a replacement terminal clears it.
+      assertEquals("approval-1", runtime.execApprovalsNotice.value?.approvalId)
+      assertEquals("A prior response already denied this approval.", runtime.execApprovalsNotice.value?.message)
+    }
+
+  @Test
+  fun staleDismissLeavesReplacementNoticeVisible() =
+    runBlocking {
+      val runtime = createTestRuntime()
+      seedConnectedRuntime(runtime, unifiedMethods)
+      seedApprovals(
+        runtime,
+        listOf(
+          approvalSummary(id = "approval-1", commandText = "echo first"),
+          approvalSummary(id = "approval-2", commandText = "echo second"),
+        ),
+      )
+      runtime.gatewayDataRequestOverrideForTests = { _, method, params ->
+        check(method == "approval.resolve")
+        val request = Json.parseToJsonElement(requireNotNull(params)).jsonObject
+        val id =
+          request["id"]
+            ?.jsonPrimitive
+            ?.content
+            ?: error("missing approval id")
+        unifiedResolve(applied = false, status = "denied", decision = "deny", id = id)
+      }
+
+      runtime.resolveExecApproval("approval-1", "allow-once")
+      waitUntil { runtime.execApprovals.value.map { it.id } == listOf("approval-2") }
+      val staleNotice = requireNotNull(runtime.execApprovalsNotice.value)
+      assertEquals("approval-1", staleNotice.approvalId)
+
+      runtime.resolveExecApproval("approval-2", "allow-once")
+      waitUntil { runtime.execApprovals.value.isEmpty() }
+      val replacement = requireNotNull(runtime.execApprovalsNotice.value)
+      assertEquals("approval-2", replacement.approvalId)
+
+      // A close tap rendered for the first notice races the replacement: the stale
+      // dismiss must not hide the newer unacknowledged outcome.
+      runtime.dismissExecApprovalsNotice(staleNotice)
+      assertEquals(replacement, runtime.execApprovalsNotice.value)
+
+      runtime.dismissExecApprovalsNotice(replacement)
       assertNull(runtime.execApprovalsNotice.value)
     }
 

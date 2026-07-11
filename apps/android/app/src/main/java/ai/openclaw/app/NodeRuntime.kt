@@ -1762,9 +1762,13 @@ class NodeRuntime private constructor(
     }
   }
 
-  fun dismissExecApprovalsNotice() {
+  fun dismissExecApprovalsNotice(expected: GatewayExecApprovalNotice) {
     synchronized(execApprovalsStateLock) {
-      _execApprovalsNotice.value = null
+      // Only clear the notice the close button actually rendered; a stale dismiss
+      // racing a replacement notice must not hide the newer unacknowledged outcome.
+      if (_execApprovalsNotice.value == expected) {
+        _execApprovalsNotice.value = null
+      }
     }
   }
 
@@ -4896,7 +4900,9 @@ class NodeRuntime private constructor(
             currentRows.map { row ->
               if (row.id == id) row.copy(resolvingDecision = decision, errorText = null) else row
             }
-          _execApprovalsNotice.value = null
+          // Do not clear the notice here: it reports a different approval's terminal
+          // outcome (a same-id write cannot start after its terminal notice retired the
+          // row) and must stay visible until the user acknowledges it.
         }
       }
     val pendingWrite = registeredWrite

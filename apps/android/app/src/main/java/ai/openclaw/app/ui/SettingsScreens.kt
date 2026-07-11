@@ -572,7 +572,7 @@ private fun ApprovalsSettingsScreen(
     // Terminal outcomes always retire their card first, so the notice renders as a
     // standalone banner above the list; it stays visible until the user dismisses it.
     execApprovalsNotice?.let { notice ->
-      ExecApprovalNotice(notice = notice, onDismiss = viewModel::dismissExecApprovalsNotice)
+      ExecApprovalNotice(notice = notice, onDismiss = { viewModel.dismissExecApprovalsNotice(notice) })
     }
     if (!isConnected) {
       ClawPanel {
