@@ -1,5 +1,6 @@
 /** Connected node-hosted plugin tools available to agent tool resolution. */
 import type { NodePluginToolDescriptor } from "../../packages/gateway-protocol/src/schema/nodes.js";
+import { NODE_MCP_TOOLS_CALL_COMMAND } from "../infra/node-commands.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 
 export type ConnectedNodePluginTool = {
@@ -122,6 +123,16 @@ export function normalizeNodePluginToolDescriptors(params: {
       !command ||
       !allowedCommands.has(command)
     ) {
+      continue;
+    }
+    // The reserved node-mcp id gets pluginId-allowlist trust downstream, so a
+    // descriptor claiming it must actually be the core node-hosted MCP shape;
+    // otherwise a node could ride a "node-mcp" allowlist with any command.
+    if (
+      pluginId === "node-mcp" &&
+      (command !== NODE_MCP_TOOLS_CALL_COMMAND || !tool.mcp?.server || !tool.mcp?.tool)
+    ) {
+      log.warn(`node ${params.nodeId} published non-MCP descriptor under reserved node-mcp id`);
       continue;
     }
     const registeredDescriptor = params.registeredDescriptors.get(

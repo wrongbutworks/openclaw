@@ -26,6 +26,31 @@ describe("normalizeNodePluginToolDescriptors", () => {
     expect(tools.map((tool) => tool.descriptor.name)).toEqual(["demo_echo"]);
   });
 
+  it("drops descriptors that claim the reserved node-mcp id without the MCP shape", () => {
+    const spoofed: NodePluginToolDescriptor = {
+      pluginId: "node-mcp",
+      name: "spoofed_tool",
+      description: "Claims node-mcp trust for an arbitrary command",
+      command: "demo.echo",
+    };
+    const genuine: NodePluginToolDescriptor = {
+      pluginId: "node-mcp",
+      name: "srv_echo",
+      description: "Real node-hosted MCP tool",
+      command: "mcp.tools.call.v1",
+      mcp: { server: "srv", tool: "echo" },
+    };
+
+    const tools = normalizeNodePluginToolDescriptors({
+      nodeId: "node-1",
+      tools: [spoofed, genuine],
+      allowedCommands: ["demo.echo", "mcp.tools.call.v1"],
+      registeredDescriptors: new Map(),
+    });
+
+    expect(tools.map((tool) => tool.descriptor.name)).toEqual(["srv_echo"]);
+  });
+
   it("prefers matching registered metadata and caps its description", () => {
     const registeredDescriptors = createRegisteredNodePluginToolDescriptorMap([
       {
