@@ -231,17 +231,6 @@ function resolveExecApprovalButtonsExplicitlyDisabled(params: {
   return resolveTelegramInlineButtonsConfigScope(capabilities) === "off";
 }
 
-export function shouldEnableTelegramExecApprovalButtons(params: {
-  cfg: OpenClawConfig;
-  accountId?: string | null;
-  to: string;
-}): boolean {
-  if (!shouldInjectTelegramExecApprovalButtons(params)) {
-    return false;
-  }
-  return !resolveExecApprovalButtonsExplicitlyDisabled(params);
-}
-
 export function shouldSuppressLocalTelegramExecApprovalPrompt(params: {
   cfg: OpenClawConfig;
   accountId?: string | null;

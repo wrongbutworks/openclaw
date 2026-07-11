@@ -99,6 +99,24 @@ function reportPersistentApprovalReactionError(error: unknown): void {
   }
 }
 
+function reportApprovalBindingCorrelationMismatch(binding: {
+  approvalId: string;
+  approvalKind: string;
+}): void {
+  // Fail closed but never silently: a pending command whose text collides with
+  // the marker lines would otherwise disable reactions with no operator signal.
+  try {
+    getOptionalWhatsAppRuntime()
+      ?.logging.getChildLogger({ plugin: "whatsapp", feature: "approval-reaction-state" })
+      .warn("WhatsApp approval prompt text failed binding correlation; reactions disabled", {
+        approvalId: binding.approvalId,
+        approvalKind: binding.approvalKind,
+      });
+  } catch {
+    // Best effort only.
+  }
+}
+
 function readPersistedTarget(target: unknown): WhatsAppApprovalReactionTarget | null {
   const value = target as Partial<WhatsAppApprovalReactionTarget> | null | undefined;
   if (
@@ -286,7 +304,11 @@ export function prepareWhatsAppApprovalPayloadForDelivery(params: {
   presentation: MessagePresentation;
 }): ReplyPayload | null {
   const binding = readTypedApprovalDeliveryBinding(params);
-  if (!binding || !visibleApprovalBindingMatches(params.payload.text, binding)) {
+  if (!binding) {
+    return null;
+  }
+  if (!visibleApprovalBindingMatches(params.payload.text, binding)) {
+    reportApprovalBindingCorrelationMismatch(binding);
     return null;
   }
   return {
@@ -379,7 +401,11 @@ export function registerWhatsAppApprovalReactionTargetForDeliveredPayload(params
     return false;
   }
   const binding = readDeliveredApprovalBinding(params.payload);
-  if (!binding || !visibleApprovalBindingMatches(params.payload.text, binding)) {
+  if (!binding) {
+    return false;
+  }
+  if (!visibleApprovalBindingMatches(params.payload.text, binding)) {
+    reportApprovalBindingCorrelationMismatch(binding);
     return false;
   }
   const accountId = resolveWhatsAppAccount({

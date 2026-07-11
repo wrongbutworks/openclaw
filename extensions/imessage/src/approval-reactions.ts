@@ -208,6 +208,25 @@ function reportPersistentApprovalReactionError(error: unknown): void {
   }
 }
 
+function reportApprovalBindingCorrelationMismatch(binding: {
+  approvalId: string;
+  approvalKind: string;
+}): void {
+  // Fail closed but never silently: prompt text colliding with the marker
+  // lines (or chunked delivery) would otherwise disable tapback approvals
+  // with no operator signal.
+  try {
+    getOptionalIMessageRuntime()
+      ?.logging.getChildLogger({ plugin: "imessage", feature: "approval-reaction-state" })
+      .warn("iMessage approval prompt text failed binding correlation; tapbacks disabled", {
+        approvalId: binding.approvalId,
+        approvalKind: binding.approvalKind,
+      });
+  } catch {
+    // Best effort only.
+  }
+}
+
 function readPersistedTarget(value: unknown): IMessageApprovalReactionTarget | null {
   const target = value as Partial<IMessageApprovalReactionTarget> | undefined;
   if (
@@ -453,11 +472,11 @@ export function addIMessageApprovalReactionHintToStructuredPayload(params: {
 }): ReplyPayload | null {
   const metadata = readTypedApprovalPresentationBinding(params.payload);
   const text = params.payload.text;
-  if (
-    metadata?.approvalKind !== params.approvalKind ||
-    !text ||
-    !visibleApprovalBindingMatches(text, metadata, { requireReactionHint: false })
-  ) {
+  if (metadata?.approvalKind !== params.approvalKind || !text) {
+    return null;
+  }
+  if (!visibleApprovalBindingMatches(text, metadata, { requireReactionHint: false })) {
+    reportApprovalBindingCorrelationMismatch(metadata);
     return null;
   }
   return {
@@ -666,6 +685,11 @@ function listDeliveredIMessageApprovalGuids(params: {
     }
     seen.add(guid);
     messageIds.push(guid);
+  }
+  if (messageIds.length === 0 && params.results.some((result) => result.channel === "imessage")) {
+    // Delivered but nothing correlated (e.g. chunked prompt split the hint):
+    // tapbacks are dead for this approval, so leave a trace.
+    reportApprovalBindingCorrelationMismatch(params.binding);
   }
   return messageIds;
 }

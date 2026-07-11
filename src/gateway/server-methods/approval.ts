@@ -212,6 +212,30 @@ function loadVisibleApproval(params: {
     ) {
       return null;
     }
+    // A transport ref misses the pre-lookup live check (live map keys are
+    // canonical ids), and durable rows do not persist requestedByConnId.
+    // Re-check the live binding by canonical id so a ref-locator resolve
+    // enforces the same connection-bound authorization as a canonical-id one.
+    if (lookup.record.id !== params.id) {
+      const canonicalLiveRecord =
+        params.execApprovalManager.getLiveSnapshot(lookup.record.id) ??
+        params.pluginApprovalManager.getLiveSnapshot(lookup.record.id);
+      if (
+        canonicalLiveRecord &&
+        !canAccessOperatorApproval({
+          client: params.client,
+          allowApprovalRuntime: params.allowApprovalRuntime,
+          binding: {
+            requestedByConnId: canonicalLiveRecord.requestedByConnId,
+            requestedByDeviceId: canonicalLiveRecord.requestedByDeviceId,
+            requestedByClientId: canonicalLiveRecord.requestedByClientId,
+            reviewerDeviceIds: canonicalLiveRecord.approvalReviewerDeviceIds,
+          },
+        })
+      ) {
+        return null;
+      }
+    }
     const manager =
       lookup.record.kind === "exec" ? params.execApprovalManager : params.pluginApprovalManager;
     // Durable truth can advance outside this manager. Settle only an existing

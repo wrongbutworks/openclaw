@@ -1124,6 +1124,53 @@ describe("unified approval handlers", () => {
     await expect(pending.decision).resolves.toBe("deny");
   });
 
+  it("enforces the live connection binding on transport-ref lookups", async () => {
+    const databaseOptions = createDatabaseOptions();
+    const managers = createManagers(databaseOptions);
+    // Only binding is the requester connection: no device, no client id, no
+    // explicit reviewer list. The durable row cannot represent this binding,
+    // so the ref path must re-check the live record by canonical id.
+    const pending = registerExec(managers.exec, {
+      id: "conn-bound-only-approval",
+      requester: { connId: "conn-owner", deviceId: null, clientId: null },
+      reviewerDeviceIds: [],
+    });
+    const durable = getOperatorApproval({ id: pending.record.id, databaseOptions });
+    expect(durable?.resolutionRef).toHaveLength(43);
+    const handlers = createApprovalHandlers({
+      execApprovalManager: managers.exec,
+      pluginApprovalManager: managers.plugin,
+      databaseOptions,
+    });
+
+    const foreignByCanonicalId = await invoke({
+      handlers,
+      method: "approval.resolve",
+      body: { id: pending.record.id, kind: "exec", decision: "deny" },
+      client: createClient({ deviceId: "other" }),
+    });
+    const foreignByRef = await invoke({
+      handlers,
+      method: "approval.resolve",
+      body: { id: durable?.resolutionRef, kind: "exec", decision: "deny" },
+      client: createClient({ deviceId: "other" }),
+    });
+    expect(foreignByCanonicalId).toMatchObject({ ok: false });
+    expect(foreignByRef).toMatchObject({ ok: false, error: foreignByCanonicalId.error });
+
+    const owner = await invoke({
+      handlers,
+      method: "approval.resolve",
+      body: { id: durable?.resolutionRef, kind: "exec", decision: "deny" },
+      client: createClient({ deviceId: "owner-device", connId: "conn-owner" }),
+    });
+    expect(owner.result).toMatchObject({
+      applied: true,
+      approval: { id: pending.record.id, status: "denied", decision: "deny" },
+    });
+    await expect(pending.decision).resolves.toBe("deny");
+  });
+
   it.each([
     { status: "allowed", decision: "allow-once", terminalDecision: "allow-once" },
     { status: "denied", decision: "deny", terminalDecision: "deny" },

@@ -1374,6 +1374,52 @@ describe("registerSlackInteractionEvents", () => {
     });
   });
 
+  it("tells the clicker when a typed approval is no longer pending", async () => {
+    const { ctx, app, getHandler } = createContext({
+      cfg: {
+        channels: {
+          slack: {
+            execApprovals: {
+              enabled: true,
+              approvers: ["U123"],
+              target: "both",
+            },
+          },
+        },
+      },
+    });
+    resolveApprovalOverGatewayMock.mockRejectedValueOnce(
+      new Error("unknown or expired approval id"),
+    );
+    registerSlackInteractionEvents({ ctx: ctx as never });
+    const respond = vi.fn().mockResolvedValue(undefined);
+
+    await getHandler()({
+      ack: vi.fn().mockResolvedValue(undefined),
+      respond,
+      body: {
+        user: { id: "U123" },
+        channel: { id: "C1" },
+        container: { channel_id: "C1", message_ts: "100.200" },
+        message: { ts: "100.200", text: "Exec approval required", blocks: [] },
+      },
+      action: {
+        type: "button",
+        action_id: "openclaw:approval_button:1:1",
+        block_id: "exec_actions",
+        value:
+          'openclaw:approval:v1:{"approvalId":"req-123","approvalKind":"exec","decision":"allow-once"}',
+        text: { type: "plain_text", text: "Allow once" },
+      },
+    });
+
+    expect(app.client.chat.update).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith({
+      text: "This approval is no longer pending.",
+      response_type: "ephemeral",
+    });
+  });
+
   it("fails closed for malformed Slack approval envelopes", async () => {
     const { ctx, app, getHandler } = createContext();
     registerSlackInteractionEvents({ ctx: ctx as never });

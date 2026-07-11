@@ -687,6 +687,16 @@ async function handleSlackApprovalInteraction(params: {
     params.ctx.runtime.log?.(
       `slack:interaction approval resolve failed id=${params.approval.approvalId}: ${String(error)}`,
     );
+    // The clicker must see an outcome: pruned/expired records and gateway
+    // outages otherwise ack the click silently (Discord's sibling responds).
+    if (isApprovalNotFoundError(error)) {
+      await respondEphemeral(params.respond, "This approval is no longer pending.");
+      return true;
+    }
+    await respondEphemeral(
+      params.respond,
+      "Could not reach the Gateway to resolve this approval. Try again.",
+    );
     throw error;
   }
   return true;
