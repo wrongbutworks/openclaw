@@ -12,7 +12,6 @@ type CronTestPage = HTMLElement & {
   render: () => typeof nothing;
   cron: CronState;
   cronModelSuggestions: string[];
-  quickCreateOpen: boolean;
 };
 
 type TestGateway = ApplicationContext["gateway"] & {
@@ -151,9 +150,9 @@ describe("CronPage lifecycle", () => {
       ...connectedState,
       cronStatus: { enabled: true, jobs: 1 },
       cronJobs: [{ id: "old" } as never],
+      cronCreateOpen: true,
     };
     page.cronModelSuggestions = ["old/model"];
-    page.quickCreateOpen = true;
 
     gateway.emitSnapshot({ connected: false });
     const disconnectedState = page.cron;
@@ -162,7 +161,7 @@ describe("CronPage lifecycle", () => {
     expect(disconnectedState.cronStatus).toBeNull();
     expect(disconnectedState.cronJobs).toEqual([]);
     expect(page.cronModelSuggestions).toEqual([]);
-    expect(page.quickCreateOpen).toBe(false);
+    expect(disconnectedState.cronCreateOpen).toBe(false);
 
     gateway.emitSnapshot({ connected: true });
     expect(page.cron).not.toBe(disconnectedState);
