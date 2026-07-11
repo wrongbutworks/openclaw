@@ -315,13 +315,7 @@ export async function startNodeHostMcpManager(
         { jsonSchemaValidator: createMcpJsonSchemaValidator() },
       ) as NodeHostMcpClient);
   const resolveTransport = deps.resolveTransport ?? resolveMcpTransport;
-  const configured = Object.entries(normalizeConfiguredMcpServers(servers))
-    .filter(
-      ([serverName, config]) =>
-        serverName.length > 0 && serverName === serverName.trim() && config.enabled !== false,
-    )
-    .map(([serverName, config]) => [serverName, config as McpServerConfig] as const)
-    .toSorted(([left], [right]) => left.localeCompare(right));
+  const configured = listEnabledNodeHostMcpServers(servers);
   const sessions = new Map<string, NodeHostMcpSession>();
   const listedTools: ListedNodeMcpTool[] = [];
 
@@ -448,11 +442,20 @@ export async function startNodeHostMcpManager(
   };
 }
 
+function listEnabledNodeHostMcpServers(
+  servers: Record<string, McpServerConfig> | undefined,
+): ReadonlyArray<readonly [string, McpServerConfig]> {
+  return Object.entries(normalizeConfiguredMcpServers(servers))
+    .filter(
+      ([serverName, config]) =>
+        serverName.length > 0 && serverName === serverName.trim() && config.enabled !== false,
+    )
+    .map(([serverName, config]) => [serverName, config as McpServerConfig] as const)
+    .toSorted(([left], [right]) => left.localeCompare(right));
+}
+
 export function countConfiguredNodeHostMcpServers(
   servers: Record<string, McpServerConfig> | undefined,
 ): number {
-  return Object.entries(normalizeConfiguredMcpServers(servers)).filter(
-    ([serverName, config]) =>
-      serverName.length > 0 && serverName === serverName.trim() && config.enabled !== false,
-  ).length;
+  return listEnabledNodeHostMcpServers(servers).length;
 }

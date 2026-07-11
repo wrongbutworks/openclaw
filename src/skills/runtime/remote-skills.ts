@@ -158,7 +158,7 @@ function remoteSkillLocation(nodeId: string, name: string): string {
 
 function locatorNote(node: RemoteSkillNode, skillName: string): string {
   const label = node.displayName?.trim() || node.nodeId;
-  return `Node-hosted on ${label} (${node.nodeId}); its files and bins live on that node. With exec host=node node=${node.nodeId}, use OPENCLAW_STATE_DIR when set, otherwise the parent directory of the path printed by openclaw config file, then load skills/${skillName}/SKILL.md and run commands there; relative paths resolve on the node.`;
+  return `Node-hosted on ${label} (${node.nodeId}): files and bins live on that node under skills/${skillName}/ in its OpenClaw state dir. Run every command via exec host=node node=${node.nodeId}; relative paths resolve on the node.`;
 }
 
 export function mergeRemoteNodeSkillEntries(

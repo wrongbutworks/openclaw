@@ -66,8 +66,7 @@ describe("node-hosted skill snapshots", () => {
     expect(snapshot.skills.map((skill) => skill.name)).toEqual(["release-helper"]);
     expect(snapshot.prompt).toContain("Build Mac (node-1)");
     expect(snapshot.prompt).toContain("exec host=node node=node-1");
-    expect(snapshot.prompt).toContain("openclaw config file");
-    expect(snapshot.prompt).toContain("OPENCLAW_STATE_DIR when set");
+    expect(snapshot.prompt).toContain("skills/release-helper/ in its OpenClaw state dir");
     expect(snapshot.prompt).toContain("relative paths resolve on the node");
     expect(snapshot.prompt).toContain("node://node-1/skills/release-helper/SKILL.md");
     expect(getSkillsSnapshotVersion()).toBeGreaterThan(before);
