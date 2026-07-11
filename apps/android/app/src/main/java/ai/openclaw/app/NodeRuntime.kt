@@ -1763,13 +1763,10 @@ class NodeRuntime private constructor(
   }
 
   fun dismissExecApprovalsNotice(expected: GatewayExecApprovalNotice) {
-    synchronized(execApprovalsStateLock) {
-      // Only clear the notice the close button actually rendered; a stale dismiss
-      // racing a replacement notice must not hide the newer unacknowledged outcome.
-      if (_execApprovalsNotice.value == expected) {
-        _execApprovalsNotice.value = null
-      }
-    }
+    // Atomic conditional clear: not every notice publisher holds execApprovalsStateLock
+    // (refreshExecApprovalFromGateway's terminal branch), so a locked check-then-clear
+    // could still let a stale dismiss clobber a freshly published replacement.
+    _execApprovalsNotice.compareAndSet(expected, null)
   }
 
   fun refreshChannels() {

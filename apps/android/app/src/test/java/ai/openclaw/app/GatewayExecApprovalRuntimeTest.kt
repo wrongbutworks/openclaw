@@ -877,15 +877,15 @@ class GatewayExecApprovalRuntimeTest {
           approvalSummary(id = "approval-2", commandText = "echo second"),
         ),
       )
-      runtime.gatewayDataRequestOverrideForTests = { _, method, params ->
-        check(method == "approval.resolve")
-        val request = Json.parseToJsonElement(requireNotNull(params)).jsonObject
-        val id =
-          request["id"]
-            ?.jsonPrimitive
-            ?.content
-            ?: error("missing approval id")
-        unifiedResolve(applied = false, status = "denied", decision = "deny", id = id)
+      runtime.gatewayDataRequestOverrideForTests = { _, method, _ ->
+        when (method) {
+          "approval.resolve" -> unifiedResolve(applied = false, status = "denied", decision = "deny")
+          // Readback for the approval-2 resolved event: this terminal-notice publisher
+          // does not hold execApprovalsStateLock, the exact writer the atomic dismiss
+          // must not race.
+          "approval.get" -> unifiedGet(status = "denied", decision = "deny", id = "approval-2")
+          else -> error("unexpected method $method")
+        }
       }
 
       runtime.resolveExecApproval("approval-1", "allow-once")
@@ -893,13 +893,13 @@ class GatewayExecApprovalRuntimeTest {
       val staleNotice = requireNotNull(runtime.execApprovalsNotice.value)
       assertEquals("approval-1", staleNotice.approvalId)
 
-      runtime.resolveExecApproval("approval-2", "allow-once")
+      invokeApprovalEvent(runtime, "exec.approval.resolved", """{"id":"approval-2"}""")
       waitUntil { runtime.execApprovals.value.isEmpty() }
       val replacement = requireNotNull(runtime.execApprovalsNotice.value)
       assertEquals("approval-2", replacement.approvalId)
 
-      // A close tap rendered for the first notice races the replacement: the stale
-      // dismiss must not hide the newer unacknowledged outcome.
+      // compareAndSet semantics: a close tap captured for the first notice must leave
+      // the replacement untouched; only dismissing the rendered notice clears it.
       runtime.dismissExecApprovalsNotice(staleNotice)
       assertEquals(replacement, runtime.execApprovalsNotice.value)
 
