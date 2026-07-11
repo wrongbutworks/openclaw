@@ -348,10 +348,16 @@ enum WatchMessagingPayloadCodec {
         guard (payload["type"] as? String) == OpenClawWatchPayloadType.execApprovalSnapshotRequest.rawValue else {
             return nil
         }
-        guard let requestId = exactNonEmpty(payload["requestId"] as? String),
-              let rawHeldApprovals = payload["heldApprovals"] as? [Any]
-        else {
-            return nil
+        // Version-skew compat: shipped Watch binaries request snapshots without requestId or
+        // heldApprovals. A missing key decodes as the shipped shape (present-but-malformed
+        // still rejects); remove once the minimum paired Watch app version sends heldApprovals.
+        let requestId = self.exactNonEmpty(payload["requestId"] as? String) ?? UUID().uuidString
+        let rawHeldApprovals: [Any]
+        if let rawHeldApprovalsValue = payload["heldApprovals"] {
+            guard let heldApprovalsArray = rawHeldApprovalsValue as? [Any] else { return nil }
+            rawHeldApprovals = heldApprovalsArray
+        } else {
+            rawHeldApprovals = []
         }
         var heldApprovals: [WatchExecApprovalSnapshotRequestItem] = []
         heldApprovals.reserveCapacity(rawHeldApprovals.count)
