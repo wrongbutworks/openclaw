@@ -76,6 +76,7 @@ function toolPolicyAllows(params: {
   exposedToolName?: string;
   allowlist: Set<string>;
   denylist: ReturnType<typeof compileGlobPatterns>;
+  registered: boolean;
 }): boolean {
   const pluginId = normalizeToolName(params.pluginId);
   const toolName = normalizeToolName(params.toolName);
@@ -91,10 +92,14 @@ function toolPolicyAllows(params: {
   if (params.allowlist.size === 0 || params.allowlist.has(DEFAULT_PLUGIN_TOOLS_ALLOWLIST_ENTRY)) {
     return true;
   }
+  // pluginId is node-supplied for unregistered descriptors, so it must not
+  // satisfy pluginId-scoped allowlist entries (a node could claim "github").
+  // The reserved node-mcp id is safe: real plugins can never register it.
+  const pluginIdTrusted = params.registered || pluginId === "node-mcp";
   return (
     params.allowlist.has("*") ||
     params.allowlist.has("group:plugins") ||
-    params.allowlist.has(pluginId) ||
+    (pluginIdTrusted && params.allowlist.has(pluginId)) ||
     params.allowlist.has(toolName) ||
     params.allowlist.has(exposedToolName)
   );
@@ -207,6 +212,7 @@ export function createNodePluginTools(params: {
         exposedToolName: toolName,
         allowlist,
         denylist,
+        registered: entry.registered,
       })
     ) {
       continue;

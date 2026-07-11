@@ -1,5 +1,5 @@
 /** Connected node-hosted plugin tools available to agent tool resolution. */
-import type { NodePluginToolDescriptor } from "../../packages/gateway-protocol/src/index.js";
+import type { NodePluginToolDescriptor } from "../../packages/gateway-protocol/src/schema/nodes.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 
 export type ConnectedNodePluginTool = {
@@ -8,6 +8,8 @@ export type ConnectedNodePluginTool = {
   platform?: string;
   remoteIp?: string;
   descriptor: NodePluginToolDescriptor;
+  /** See NormalizedNodePluginTool.registered. */
+  registered: boolean;
 };
 
 export type RegisteredNodePluginToolCommand = {
@@ -81,18 +83,28 @@ export function createRegisteredNodePluginToolDescriptorMap(
   return descriptors;
 }
 
+export type NormalizedNodePluginTool = {
+  descriptor: NodePluginToolDescriptor;
+  /**
+   * True when a gateway-side plugin registration backs this descriptor.
+   * Unregistered descriptors are trusted for execution, but their
+   * node-supplied pluginId must not satisfy pluginId-based tool allowlists.
+   */
+  registered: boolean;
+};
+
 export function normalizeNodePluginToolDescriptors(params: {
   nodeId: string;
   tools?: readonly NodePluginToolDescriptor[];
   allowedCommands: readonly string[];
   registeredDescriptors: ReadonlyMap<string, NodePluginToolDescriptor>;
   enabled?: boolean;
-}): NodePluginToolDescriptor[] {
+}): NormalizedNodePluginTool[] {
   if (params.enabled === false) {
     return [];
   }
   const allowedCommands = new Set(params.allowedCommands);
-  const normalized: NodePluginToolDescriptor[] = [];
+  const normalized: NormalizedNodePluginTool[] = [];
   // Paired nodes are the trust boundary for descriptors. Operators can disable
   // publication globally with gateway.nodes.pluginTools.enabled.
   for (const tool of params.tools ?? []) {
@@ -123,35 +135,38 @@ export function normalizeNodePluginToolDescriptors(params: {
     const mcpServer = normalizeString(descriptor.mcp?.server);
     const mcpTool = normalizeString(descriptor.mcp?.tool);
     normalized.push({
-      pluginId,
-      name,
-      description: descriptorDescription,
-      parameters: normalizeRecord(descriptor.parameters) ?? defaultParameters(),
-      command,
-      ...(mcpServer && mcpTool ? { mcp: { server: mcpServer, tool: mcpTool } } : {}),
+      descriptor: {
+        pluginId,
+        name,
+        description: descriptorDescription,
+        parameters: normalizeRecord(descriptor.parameters) ?? defaultParameters(),
+        command,
+        ...(mcpServer && mcpTool ? { mcp: { server: mcpServer, tool: mcpTool } } : {}),
+      },
+      registered: Boolean(registeredDescriptor),
     });
   }
   normalized.sort(
     (left, right) =>
-      left.pluginId.localeCompare(right.pluginId) ||
-      left.name.localeCompare(right.name) ||
-      (left.command ?? "").localeCompare(right.command ?? ""),
+      left.descriptor.pluginId.localeCompare(right.descriptor.pluginId) ||
+      left.descriptor.name.localeCompare(right.descriptor.name) ||
+      (left.descriptor.command ?? "").localeCompare(right.descriptor.command ?? ""),
   );
-  const byKey = new Map<string, NodePluginToolDescriptor>();
-  for (const descriptor of normalized) {
-    const key = `${descriptor.pluginId}\0${descriptor.name}`;
+  const byKey = new Map<string, NormalizedNodePluginTool>();
+  for (const entry of normalized) {
+    const key = `${entry.descriptor.pluginId}\0${entry.descriptor.name}`;
     if (!byKey.has(key)) {
-      byKey.set(key, descriptor);
+      byKey.set(key, entry);
     }
   }
-  const descriptors = [...byKey.values()];
-  const droppedCount = descriptors.length - NODE_PLUGIN_TOOL_MAX_DESCRIPTORS;
+  const entries = [...byKey.values()];
+  const droppedCount = entries.length - NODE_PLUGIN_TOOL_MAX_DESCRIPTORS;
   if (droppedCount > 0) {
     log.warn(
-      `node ${params.nodeId} published ${descriptors.length} plugin tool descriptors; dropped ${droppedCount} beyond the ${NODE_PLUGIN_TOOL_MAX_DESCRIPTORS} descriptor limit`,
+      `node ${params.nodeId} published ${entries.length} plugin tool descriptors; dropped ${droppedCount} beyond the ${NODE_PLUGIN_TOOL_MAX_DESCRIPTORS} descriptor limit`,
     );
   }
-  return descriptors.slice(0, NODE_PLUGIN_TOOL_MAX_DESCRIPTORS);
+  return entries.slice(0, NODE_PLUGIN_TOOL_MAX_DESCRIPTORS);
 }
 
 export function replaceConnectedNodePluginTools(params: {
@@ -159,7 +174,7 @@ export function replaceConnectedNodePluginTools(params: {
   displayName?: string;
   platform?: string;
   remoteIp?: string;
-  tools: readonly NodePluginToolDescriptor[];
+  tools: readonly NormalizedNodePluginTool[];
 }): void {
   if (params.tools.length === 0) {
     const removed = toolsByNodeId.delete(params.nodeId);
@@ -170,12 +185,13 @@ export function replaceConnectedNodePluginTools(params: {
   }
   toolsByNodeId.set(
     params.nodeId,
-    params.tools.map((descriptor) => ({
+    params.tools.map((entry) => ({
       nodeId: params.nodeId,
       displayName: params.displayName,
       platform: params.platform,
       remoteIp: params.remoteIp,
-      descriptor,
+      descriptor: entry.descriptor,
+      registered: entry.registered,
     })),
   );
   bumpSnapshotVersion();

@@ -1,4 +1,4 @@
-import type { NodeSkillDescriptor } from "../../packages/gateway-protocol/src/index.js";
+import type { NodeSkillDescriptor } from "../../packages/gateway-protocol/src/schema/nodes.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import {
   NODE_SKILL_MAX_CONTENT_BYTES,

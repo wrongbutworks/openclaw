@@ -1,5 +1,6 @@
 /** Tests connected node-hosted plugin tool materialization. */
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { NodePluginToolDescriptor } from "../../packages/gateway-protocol/src/index.js";
 import {
   replaceConnectedNodePluginTools,
   resetConnectedNodePluginToolsForTest,
@@ -12,6 +13,19 @@ vi.mock("./tools/gateway.js", () => ({
   callGatewayTool: vi.fn(),
 }));
 
+function replaceNodePluginTools(
+  params: Omit<Parameters<typeof replaceConnectedNodePluginTools>[0], "tools"> & {
+    tools: NodePluginToolDescriptor[];
+    registered?: boolean;
+  },
+): void {
+  const { registered = false, tools, ...node } = params;
+  replaceConnectedNodePluginTools({
+    ...node,
+    tools: tools.map((descriptor) => ({ descriptor, registered })),
+  });
+}
+
 afterEach(() => {
   resetConnectedNodePluginToolsForTest();
   vi.mocked(callGatewayTool).mockReset();
@@ -19,7 +33,7 @@ afterEach(() => {
 
 describe("createNodePluginTools", () => {
   it("materializes connected node plugin tools and invokes their node command", async () => {
-    replaceConnectedNodePluginTools({
+    replaceNodePluginTools({
       nodeId: "node-1",
       displayName: "Studio Node",
       tools: [
@@ -74,7 +88,7 @@ describe("createNodePluginTools", () => {
   });
 
   it("wraps node-host MCP arguments and maps MCP content", async () => {
-    replaceConnectedNodePluginTools({
+    replaceNodePluginTools({
       nodeId: "node-1",
       tools: [
         {
@@ -124,7 +138,7 @@ describe("createNodePluginTools", () => {
   });
 
   it("disambiguates node tools that collide with existing tool names", () => {
-    replaceConnectedNodePluginTools({
+    replaceNodePluginTools({
       nodeId: "node-1",
       tools: [
         {
@@ -144,7 +158,7 @@ describe("createNodePluginTools", () => {
   });
 
   it("disambiguates matching tool names from different nodes", async () => {
-    replaceConnectedNodePluginTools({
+    replaceNodePluginTools({
       nodeId: "node-a",
       displayName: "Node A",
       tools: [
@@ -156,7 +170,7 @@ describe("createNodePluginTools", () => {
         },
       ],
     });
-    replaceConnectedNodePluginTools({
+    replaceNodePluginTools({
       nodeId: "node-b",
       displayName: "Node B",
       tools: [
@@ -195,7 +209,7 @@ describe("createNodePluginTools", () => {
 
   it("honors policy for disambiguated node tool names", () => {
     for (const nodeId of ["node-a", "node-b"]) {
-      replaceConnectedNodePluginTools({
+      replaceNodePluginTools({
         nodeId,
         tools: [
           {
@@ -221,7 +235,7 @@ describe("createNodePluginTools", () => {
   });
 
   it("keeps numeric node fragments provider-safe", () => {
-    replaceConnectedNodePluginTools({
+    replaceNodePluginTools({
       nodeId: "123",
       tools: [
         {
@@ -242,7 +256,7 @@ describe("createNodePluginTools", () => {
 
   it("keeps numeric disambiguation when node fragments collide", () => {
     for (const nodeId of ["node-a", "node_a"]) {
-      replaceConnectedNodePluginTools({
+      replaceNodePluginTools({
         nodeId,
         tools: [
           {
@@ -264,7 +278,7 @@ describe("createNodePluginTools", () => {
   it("keeps disambiguated node tool names provider-safe", () => {
     const longName = `a${"b".repeat(63)}`;
     for (const nodeId of ["node-a", "node-b"]) {
-      replaceConnectedNodePluginTools({
+      replaceNodePluginTools({
         nodeId,
         tools: [
           {
@@ -285,7 +299,7 @@ describe("createNodePluginTools", () => {
   });
 
   it("honors plugin tool allow and deny policy", () => {
-    replaceConnectedNodePluginTools({
+    replaceNodePluginTools({
       nodeId: "node-1",
       tools: [
         {
@@ -301,6 +315,7 @@ describe("createNodePluginTools", () => {
           command: "remote.status",
         },
       ],
+      registered: true,
     });
 
     expect(
@@ -310,5 +325,53 @@ describe("createNodePluginTools", () => {
       }).map((tool) => tool.name),
     ).toEqual(["remote_echo"]);
     expect(createNodePluginTools({ toolAllowlist: ["other-plugin"] })).toEqual([]);
+  });
+
+  it("trusts plugin-id allowlist entries only for registered tools and node-mcp", () => {
+    const githubDescriptor: NodePluginToolDescriptor = {
+      pluginId: "github",
+      name: "remote_repo_search",
+      description: "Search repositories through a remote node",
+      command: "remote.search",
+    };
+
+    replaceNodePluginTools({
+      nodeId: "node-1",
+      tools: [githubDescriptor],
+    });
+    expect(createNodePluginTools({ toolAllowlist: ["github"] })).toEqual([]);
+
+    replaceNodePluginTools({
+      nodeId: "node-1",
+      tools: [githubDescriptor],
+      registered: true,
+    });
+    expect(createNodePluginTools({ toolAllowlist: ["github"] }).map((tool) => tool.name)).toEqual([
+      "remote_repo_search",
+    ]);
+
+    replaceNodePluginTools({
+      nodeId: "node-1",
+      tools: [{ ...githubDescriptor, pluginId: "node-mcp" }],
+    });
+    expect(
+      createNodePluginTools({ toolAllowlist: ["node-mcp"] }).map((tool) => tool.name),
+    ).toEqual(["remote_repo_search"]);
+
+    replaceNodePluginTools({
+      nodeId: "node-1",
+      tools: [githubDescriptor],
+    });
+    expect(
+      createNodePluginTools({ toolAllowlist: ["remote_repo_search"] }).map(
+        (tool) => tool.name,
+      ),
+    ).toEqual(["remote_repo_search"]);
+    expect(
+      createNodePluginTools({
+        toolAllowlist: ["remote_repo_search"],
+        toolDenylist: ["github"],
+      }),
+    ).toEqual([]);
   });
 });

@@ -1,4 +1,4 @@
-import type { NodePluginToolDescriptor } from "../../packages/gateway-protocol/src/index.js";
+import type { NodePluginToolDescriptor } from "../../packages/gateway-protocol/src/schema/nodes.js";
 
 /** Node record returned by gateway node-list endpoints. */
 export type NodeListNode = {

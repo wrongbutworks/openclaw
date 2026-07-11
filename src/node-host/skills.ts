@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { NodeSkillDescriptor } from "../../packages/gateway-protocol/src/index.js";
+import type { NodeSkillDescriptor } from "../../packages/gateway-protocol/src/schema/nodes.js";
 import {
   NODE_SKILL_MAX_CONTENT_BYTES,
   NODE_SKILL_MAX_COUNT,

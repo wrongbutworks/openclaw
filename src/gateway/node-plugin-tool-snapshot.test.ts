@@ -23,7 +23,7 @@ describe("normalizeNodePluginToolDescriptors", () => {
       registeredDescriptors: new Map(),
     });
 
-    expect(tools.map((tool) => tool.name)).toEqual(["demo_echo"]);
+    expect(tools.map((tool) => tool.descriptor.name)).toEqual(["demo_echo"]);
   });
 
   it("prefers matching registered metadata and caps its description", () => {
@@ -48,11 +48,40 @@ describe("normalizeNodePluginToolDescriptors", () => {
       registeredDescriptors,
     });
 
-    expect(tools[0]?.description).toHaveLength(1024);
-    expect(tools[0]?.parameters).toEqual({
+    expect(tools[0]?.descriptor.description).toHaveLength(1024);
+    expect(tools[0]?.descriptor.parameters).toEqual({
       type: "object",
       properties: { text: { type: "string" } },
     });
+  });
+
+  it("marks descriptors by whether gateway registration backs them", () => {
+    const registeredDescriptors = createRegisteredNodePluginToolDescriptorMap([
+      {
+        pluginId: "demo",
+        command: {
+          command: "demo.echo",
+          agentTool: {
+            name: "demo_echo",
+            description: "Registered echo",
+          },
+        },
+      },
+    ]);
+
+    const tools = normalizeNodePluginToolDescriptors({
+      nodeId: "node-1",
+      tools: [descriptor("demo_echo"), descriptor("demo_status", "demo.status")],
+      allowedCommands: ["demo.echo", "demo.status"],
+      registeredDescriptors,
+    });
+
+    expect(
+      tools.map((tool) => ({ name: tool.descriptor.name, registered: tool.registered })),
+    ).toEqual([
+      { name: "demo_echo", registered: true },
+      { name: "demo_status", registered: false },
+    ]);
   });
 
   it("sorts before keeping at most 128 descriptors", () => {
@@ -68,8 +97,8 @@ describe("normalizeNodePluginToolDescriptors", () => {
     });
 
     expect(normalized).toHaveLength(128);
-    expect(normalized[0]?.name).toBe("tool_000");
-    expect(normalized[127]?.name).toBe("tool_127");
+    expect(normalized[0]?.descriptor.name).toBe("tool_000");
+    expect(normalized[127]?.descriptor.name).toBe("tool_127");
   });
 
   it("returns no descriptors when gateway publication is disabled", () => {

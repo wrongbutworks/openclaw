@@ -1,4 +1,4 @@
-import type { NodeSkillDescriptor } from "../../../packages/gateway-protocol/src/index.js";
+import type { NodeSkillDescriptor } from "../../../packages/gateway-protocol/src/schema/nodes.js";
 import { createSyntheticSourceInfo } from "../../agents/sessions/source-info.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { resolveNodeIdFromNodeList } from "../../shared/node-resolve.js";

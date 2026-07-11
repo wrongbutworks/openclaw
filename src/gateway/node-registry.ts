@@ -7,14 +7,18 @@ import {
   resolveExpiresAtMsFromDurationMs,
   resolveTimerTimeoutMs,
 } from "@openclaw/normalization-core/number-coercion";
+// NodeSession is plugin-SDK-reachable; importing these types from the
+// gateway-protocol index would retain the whole ProtocolSchemas registry in
+// the public plugin-sdk dts (check-plugin-sdk-exports guards this).
 import type {
   NodePluginToolDescriptor,
   NodeSkillDescriptor,
-} from "../../packages/gateway-protocol/src/index.js";
+} from "../../packages/gateway-protocol/src/schema/nodes.js";
 import { logRejectedLargePayload } from "../logging/diagnostic-payload.js";
 import {
   createRegisteredNodePluginToolDescriptorMap,
   normalizeNodePluginToolDescriptors,
+  type NormalizedNodePluginTool,
   removeConnectedNodePluginTools,
   replaceConnectedNodePluginTools,
   type RegisteredNodePluginToolCommand,
@@ -224,7 +228,7 @@ export class NodeRegistry {
     nodeId: string;
     tools?: readonly NodePluginToolDescriptor[];
     allowedCommands: readonly string[];
-  }): NodePluginToolDescriptor[] {
+  }): NormalizedNodePluginTool[] {
     return normalizeNodePluginToolDescriptors({
       ...params,
       enabled: this.options.nodePluginToolsEnabled,
@@ -235,18 +239,18 @@ export class NodeRegistry {
   }
 
   private replaceEffectiveNodePluginTools(node: NodeSession): void {
-    const nodePluginTools = this.normalizePluginToolDescriptors({
+    const normalized = this.normalizePluginToolDescriptors({
       nodeId: node.nodeId,
       tools: node.declaredNodePluginTools,
       allowedCommands: node.commands,
     });
-    node.nodePluginTools = nodePluginTools;
+    node.nodePluginTools = normalized.map((entry) => entry.descriptor);
     replaceConnectedNodePluginTools({
       nodeId: node.nodeId,
       displayName: node.displayName,
       platform: node.platform,
       remoteIp: node.remoteIp,
-      tools: nodePluginTools,
+      tools: normalized,
     });
   }
 
@@ -358,7 +362,7 @@ export class NodeRegistry {
       displayName: session.displayName,
       platform: session.platform,
       remoteIp: session.remoteIp,
-      tools: nodePluginTools,
+      tools: [],
     });
     return session;
   }

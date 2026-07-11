@@ -78,10 +78,9 @@ export type NodePairRejectParams = SchemaType<"NodePairRejectParams">;
 export type NodePairRemoveParams = SchemaType<"NodePairRemoveParams">;
 export type NodeRenameParams = SchemaType<"NodeRenameParams">;
 export type NodeListParams = SchemaType<"NodeListParams">;
-export type NodePluginToolDescriptor = SchemaType<"NodePluginToolDescriptor">;
-export type NodePluginToolsUpdateParams = SchemaType<"NodePluginToolsUpdateParams">;
-export type NodeSkillDescriptor = SchemaType<"NodeSkillDescriptor">;
-export type NodeSkillsUpdateParams = SchemaType<"NodeSkillsUpdateParams">;
+// NodePluginToolDescriptor / NodeSkillDescriptor and their update params are
+// plugin-SDK-reachable, so nodes.ts exports them directly; routing them through
+// ProtocolSchemas would retain the whole registry in the public plugin-sdk dts.
 export type NodePendingAckParams = SchemaType<"NodePendingAckParams">;
 export type NodeDescribeParams = SchemaType<"NodeDescribeParams">;
 export type NodeInvokeParams = SchemaType<"NodeInvokeParams">;

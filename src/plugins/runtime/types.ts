@@ -1,5 +1,7 @@
 // Plugin runtime types describe activated plugin capabilities exposed to core execution.
-import type { NodePluginToolDescriptor } from "../../../packages/gateway-protocol/src/index.js";
+// Owner schema module import keeps the ProtocolSchemas registry out of the
+// public plugin-sdk dts graph (check-plugin-sdk-exports guards this).
+import type { NodePluginToolDescriptor } from "../../../packages/gateway-protocol/src/schema/nodes.js";
 import type { OperatorScope } from "../../gateway/operator-scopes.js";
 import type { PluginRuntimeCore, RuntimeLogger } from "./types-core.js";
 

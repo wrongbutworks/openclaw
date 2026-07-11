@@ -1,5 +1,5 @@
 // Gateway Protocol schema module defines protocol validation shapes.
-import { Type } from "typebox";
+import { type Static, Type } from "typebox";
 import { NonEmptyString } from "./primitives.js";
 
 const NodePluginToolNameSchema = Type.String({
@@ -121,6 +121,11 @@ export const NodePluginToolsUpdateParamsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+// Plugin-SDK-reachable types export directly from this owner module; routing them
+// through the ProtocolSchemas registry retains the whole registry in public dts.
+export type NodePluginToolDescriptor = Static<typeof NodePluginToolDescriptorSchema>;
+export type NodePluginToolsUpdateParams = Static<typeof NodePluginToolsUpdateParamsSchema>;
+
 /** Agent-visible skill descriptor advertised by a connected node. */
 export const NodeSkillDescriptorSchema = Type.Object(
   {
@@ -138,6 +143,9 @@ export const NodeSkillsUpdateParamsSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+
+export type NodeSkillDescriptor = Static<typeof NodeSkillDescriptorSchema>;
+export type NodeSkillsUpdateParams = Static<typeof NodeSkillsUpdateParamsSchema>;
 
 /** Acknowledges queued node work that the node has consumed. */
 export const NodePendingAckParamsSchema = Type.Object(
