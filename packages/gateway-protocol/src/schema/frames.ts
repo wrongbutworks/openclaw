@@ -1,6 +1,7 @@
 // Gateway Protocol schema module defines protocol validation shapes.
 import type { Static } from "typebox";
 import { Type } from "typebox";
+import { NodePluginToolDescriptorSchema } from "./nodes.js";
 import { GatewayClientIdSchema, GatewayClientModeSchema, NonEmptyString } from "./primitives.js";
 import { SnapshotSchema, StateVersionSchema } from "./snapshot.js";
 
@@ -52,6 +53,7 @@ export const ConnectParamsSchema = Type.Object(
     ),
     caps: Type.Optional(Type.Array(NonEmptyString, { default: [] })),
     commands: Type.Optional(Type.Array(NonEmptyString)),
+    nodePluginTools: Type.Optional(Type.Array(NodePluginToolDescriptorSchema)),
     permissions: Type.Optional(Type.Record(NonEmptyString, Type.Boolean())),
     pathEnv: Type.Optional(Type.String()),
     role: Type.Optional(NonEmptyString),

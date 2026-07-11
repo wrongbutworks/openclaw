@@ -1,4 +1,5 @@
 // Plugin runtime types describe activated plugin capabilities exposed to core execution.
+import type { NodePluginToolDescriptor } from "../../../packages/gateway-protocol/src/index.js";
 import type { OperatorScope } from "../../gateway/operator-scopes.js";
 import type { PluginRuntimeCore, RuntimeLogger } from "./types-core.js";
 
@@ -73,6 +74,7 @@ export type RuntimeNodeListResult = {
     connected?: boolean;
     caps?: string[];
     commands?: string[];
+    nodePluginTools?: NodePluginToolDescriptor[];
   }>;
 };
 
