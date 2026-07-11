@@ -25,10 +25,10 @@ Docs: https://docs.openclaw.ai
 - **Control UI sidebar usage:** remove the provider usage quota row from the expanded sidebar while keeping usage details available in the chat composer and Usage page. Thanks @shakkernerd.
 - **Android chat code highlighting:** render fenced Kotlin, Swift, TypeScript, JavaScript, Python, Bash, and JSON blocks with bounded, theme-aware syntax colors while preserving plain rendering for unknown, partial, or oversized blocks. (#100217)
 - **Gateway TTS playback:** add an operator-scoped `tts.speak` RPC that returns configured-provider speech as inline whole-clip audio for remote clients. (#100708, #100770)
-- **Durable operator approvals:** persist Gateway exec and plugin approval lifecycles in shared SQLite, expose kind-agnostic lookup and first-answer-wins resolution for authorized surfaces, and retain safe terminal audit state across reconnects and restarts. (#103505)
 
 ### Fixes
 
+- **Gateway service audit:** treat POSIX shell `-c` wrappers as opaque for the gateway-subcommand check, avoiding false missing-command warnings for shell-wrapped macOS LaunchAgents without parsing inner commands or ports. Fixes #81751. (#81778) Thanks @liaoandi.
 - **Outbound channel bootstrap:** suppress repeated failed plugin activation for the same channel, config, and registry generation while retrying after config or registry reloads. (#100377) Thanks @xialonglee.
 - **OpenAI Realtime client-secret deadlines:** bound voice and transcription secret acquisition to 30 seconds through the guarded fetch boundary while preserving authentication and bounded response parsing. (#102860) Thanks @Alix-007.
 - **Gateway client watchdog:** keep transport-stall detection active for unbounded and mixed pending requests so dead sockets reject pending requests, reconnect, and never replay rejected requests. (#103407) Thanks @NianJiuZst.
