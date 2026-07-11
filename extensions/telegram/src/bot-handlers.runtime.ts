@@ -252,7 +252,6 @@ function isApprovalAlreadyResolvedError(error: unknown): boolean {
 function resolvePromptContextTextDedupeKey(
   message: TelegramPromptContextMessageForDedupe,
 ): string | undefined {
->>>>>>> d671dbe56e3 (feat(channels): add typed operator approval actions)
   if (typeof message.body !== "string") {
     return undefined;
   }

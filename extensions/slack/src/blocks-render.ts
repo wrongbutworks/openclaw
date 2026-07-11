@@ -3,13 +3,8 @@ import type { Block, KnownBlock } from "@slack/web-api";
 import { parseExecApprovalCommandText } from "openclaw/plugin-sdk/approval-reply-runtime";
 import {
   reduceInteractiveReply,
-<<<<<<< HEAD
-  resolveMessagePresentationControlValue,
-=======
-  renderMessagePresentationChartFallbackText,
   resolveMessagePresentationButtonAction,
   resolveMessagePresentationOptionAction,
->>>>>>> d671dbe56e3 (feat(channels): add typed operator approval actions)
 } from "openclaw/plugin-sdk/interactive-runtime";
 import type {
   InteractiveReply,
