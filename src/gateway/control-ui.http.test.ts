@@ -1906,7 +1906,7 @@ describe("handleControlUiHttpRequest", () => {
       basePath: undefined,
       url: "/approve/plugin%3Arequest.json",
     },
-  ])("leaves POST to $name approval deep links for non-UI handlers", async ({ basePath, url }) => {
+  ])("declines POST to $name approval deep links at the UI module", async ({ basePath, url }) => {
     await withControlUiRoot({
       fn: async (tmp) => {
         const { handled, end } = await runControlUiRequest({
@@ -1916,6 +1916,9 @@ describe("handleControlUiHttpRequest", () => {
           basePath,
         });
 
+        // The UI module only serves reads; the gateway's approval-document
+        // stage (server-http.ts) owns the terminal 404 for write methods, so
+        // these requests never reach plugin HTTP handlers in production.
         expect(handled).toBe(false);
         expect(end).not.toHaveBeenCalled();
       },

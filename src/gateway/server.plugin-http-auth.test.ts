@@ -674,6 +674,33 @@ describe("gateway plugin HTTP auth boundary", () => {
     });
   });
 
+  test("terminates approval-document writes at the reservation stage", async () => {
+    const handlePluginRequest = vi.fn(async (_req: IncomingMessage, res: ServerResponse) => {
+      res.statusCode = 200;
+      res.end("plugin-shadowed-approval-write");
+      return true;
+    });
+
+    await withRootMountedControlUiServer({
+      prefix: "openclaw-plugin-http-approval-write-reservation-test-",
+      handlePluginRequest,
+      run: async (server) => {
+        for (const method of ["POST", "PUT"] as const) {
+          const response = await sendRequest(server, {
+            path: "/approve/plugin%3Arequest.json",
+            method,
+          });
+
+          // The server approval-document stage owns the terminal 404 for all
+          // methods; writes never fall through to plugin HTTP handlers.
+          expect(response.res.statusCode, method).toBe(404);
+          expect(response.getBody(), method).toBe("Not Found");
+        }
+        expect(handlePluginRequest).not.toHaveBeenCalled();
+      },
+    });
+  });
+
   test("keeps approval documents reserved when control ui serving is disabled", async () => {
     const handlePluginRequest = vi.fn(async (_req: IncomingMessage, res: ServerResponse) => {
       res.statusCode = 200;

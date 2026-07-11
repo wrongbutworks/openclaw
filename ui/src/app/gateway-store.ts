@@ -110,6 +110,13 @@ export function createApplicationGateway(
     const nextSessionKey = hasRequestedSessionKey
       ? requestedSessionKey.trim()
       : snapshot.sessionKey;
+    // Only a gateway URL that differs from the current connection counts as an
+    // explicit selection. The login gate always resubmits its prefilled URL, so
+    // treating any override as a selection would let an ephemeral approval
+    // document persist the serving gateway and clobber a saved remote choice.
+    const gatewayUrlChanged =
+      connectionOverrides.gatewayUrl !== undefined &&
+      connectionOverrides.gatewayUrl !== connection.gatewayUrl;
     connection = nextConnection;
     updateSettings(
       {
@@ -122,7 +129,7 @@ export function createApplicationGateway(
             }
           : {}),
       },
-      persistConnectionSettings || connectionOverrides.gatewayUrl !== undefined,
+      persistConnectionSettings || gatewayUrlChanged,
     );
     client?.stop();
     stopClientEvents?.();

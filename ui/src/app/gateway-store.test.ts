@@ -199,4 +199,38 @@ describe("createApplicationGateway reconnecting snapshot", () => {
     expect(localStorage.getItem(pageSettingsKey)).toBe(storedPageSettings);
     expect(localStorage.getItem(selectionKey)).toBe(remoteGateway);
   });
+
+  it("keeps ephemeral login on the serving gateway from persisting the selection", () => {
+    const pageGateway = "ws://127.0.0.1:18789";
+    const remoteGateway = "wss://saved-remote.example.test";
+    const otherGateway = "wss://other-remote.example.test";
+    const pageSettingsKey = `openclaw.control.settings.v1:${pageGateway}`;
+    const selectionKey = `openclaw.control.currentGateway.v1:${pageGateway}`;
+    const settings = {
+      ...loadSettings(),
+      gatewayUrl: pageGateway,
+      token: "",
+    };
+    localStorage.setItem(selectionKey, remoteGateway);
+    const { gateway, current } = createStore({
+      settings,
+      persistDefaultConnectionSettings: false,
+    });
+
+    gateway.start();
+    // The login gate always resubmits its prefilled (serving) gateway URL;
+    // an unchanged URL must not count as an explicit gateway selection.
+    gateway.connect({ gatewayUrl: pageGateway, token: "approval-token", password: "pw" });
+
+    expect(current().opts.url).toBe(pageGateway);
+    expect(current().opts.token).toBe("approval-token");
+    expect(localStorage.getItem(pageSettingsKey)).toBeNull();
+    expect(localStorage.getItem(selectionKey)).toBe(remoteGateway);
+
+    // A genuinely changed URL is an explicit selection and persists.
+    gateway.connect({ gatewayUrl: otherGateway });
+
+    expect(current().opts.url).toBe(otherGateway);
+    expect(localStorage.getItem(selectionKey)).toBe(otherGateway);
+  });
 });
