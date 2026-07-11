@@ -1773,6 +1773,89 @@ private func overrideNotificationServingPreference(_ enabled: Bool) -> () -> Voi
         #expect(await writeGate.callCount() == 2)
     }
 
+    @Test @MainActor func `gateway switch during unknown ack readback keeps re-presented card resolving`() async throws {
+        NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState()
+        defer { NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState() }
+        let appModel = NodeAppModel(
+            notificationCenter: MockBootstrapNotificationCenter(),
+            watchMessagingService: MockWatchMessagingService())
+        defer { appModel.disconnectGateway() }
+        let options = GatewayConnectOptions(
+            role: "node",
+            scopes: [],
+            caps: [],
+            commands: [],
+            permissions: [:],
+            clientId: "ios",
+            clientMode: "node",
+            clientDisplayName: "Phone")
+        let gatewayA = try GatewayConnectConfig(
+            url: #require(URL(string: "wss://127.0.0.1:1")),
+            stableID: "gateway-a",
+            tls: nil,
+            token: "token-a",
+            bootstrapToken: nil,
+            password: nil,
+            nodeOptions: options)
+        let gatewayB = try GatewayConnectConfig(
+            url: #require(URL(string: "wss://127.0.0.1:2")),
+            stableID: "gateway-b",
+            tls: nil,
+            token: "token-b",
+            bootstrapToken: nil,
+            password: nil,
+            nodeOptions: options)
+        let approvalID = "approval-switch-mid-readback"
+        let prompt = try #require(NodeAppModel._test_makeExecApprovalPrompt(
+            id: approvalID,
+            gatewayStableID: gatewayA.effectiveStableID,
+            commandText: "echo readback",
+            allowedDecisions: ["allow-once", "deny"],
+            host: "gateway-a",
+            nodeId: nil,
+            agentId: "main",
+            expiresAtMs: 4_000_000_000_000))
+
+        appModel.applyGatewayConnectConfig(gatewayA)
+        appModel._test_presentExecApprovalPrompt(prompt)
+        appModel._test_setExecApprovalResolutionUnknownAck()
+        let fetchGate = ExecApprovalResolutionGate()
+        appModel._test_setUnifiedExecApprovalGetResponse(
+            makePendingExecApprovalJSON(approvalID),
+            beforeResponse: { _ = await fetchGate.waitForFirstCall() })
+
+        let pendingWrite = Task { @MainActor in
+            await appModel.resolvePendingExecApprovalPrompt(decision: "allow-once")
+        }
+        let deadline = ContinuousClock().now.advanced(by: .seconds(2))
+        while await !fetchGate.hasStarted(), ContinuousClock().now < deadline {
+            await Task.yield()
+        }
+        #expect(await fetchGate.hasStarted())
+
+        appModel.applyGatewayConnectConfig(gatewayB)
+        appModel.applyGatewayConnectConfig(gatewayA)
+        appModel._test_presentExecApprovalPrompt(prompt)
+        // The write settled but readback has not classified it: the attempt lease is
+        // still held, so the re-presented card must render resolving (non-actionable)
+        // and a second resolution attempt must never reach the transport.
+        #expect(appModel._test_pendingExecApprovalState().resolving)
+        await appModel.resolvePendingExecApprovalPrompt(decision: "deny")
+        #expect(await fetchGate.callCount() == 1)
+
+        await fetchGate.resume()
+        await pendingWrite.value
+
+        // The gated readback lost its route to the A->B->A switch, so the settle is the
+        // owner-frozen uncertain contract with a durable readback record.
+        #expect(appModel._test_pendingExecApprovalState().resolving)
+        #expect(appModel._test_pendingExecApprovalState().error ==
+            "Decision status is unknown. Actions remain locked until OpenClaw reconnects.")
+        #expect(appModel._test_pendingPersistedExecApprovalReadbacks().contains { readback in
+            readback.approvalId == approvalID && readback.gatewayStableID == gatewayA.effectiveStableID
+        })
+    }
+
     @Test @MainActor func `gateway switch during uncertain watch resolve records owner uncertainty`() async throws {
         NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState()
         defer { NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState() }

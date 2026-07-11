@@ -495,6 +495,7 @@ final class NodeAppModel {
         ((String, String) async -> ExecApprovalPromptFetchOutcome)?
     @ObservationIgnored private var testExecApprovalResolutionHandler:
         ((String, String, String) async -> ExecApprovalResolutionOutcome)?
+    @ObservationIgnored private var testExecApprovalResolutionReconcilesUnknownAck = false
     #endif
     private var pttVoiceWakeLeaseCaptureId: String?
     private var talkPttCommandEpoch: UInt64 = 0
@@ -1739,6 +1740,20 @@ final class NodeAppModel {
             gatewayStableID: gatewayStableID)
         else { return false }
         return self.activeExecApprovalResolutionAttempts[key]?.writeInFlight == true
+    }
+
+    /// True while the owner-scoped attempt lease is held, including the readback window
+    /// after the write settled but before the outer defer releases the lease. New
+    /// resolution attempts are rejected for that whole span, not just while writing.
+    private func hasActiveExecApprovalResolutionAttempt(
+        approvalID: String,
+        gatewayStableID: String) -> Bool
+    {
+        guard let key = Self.execApprovalResolutionKey(
+            approvalID: approvalID,
+            gatewayStableID: gatewayStableID)
+        else { return false }
+        return self.activeExecApprovalResolutionAttempts[key] != nil
     }
 
     private func markWatchResolutionAttemptResettable(
@@ -7874,7 +7889,9 @@ extension NodeAppModel {
               !self.terminalExecApprovalKeys.contains(inboxKey)
         else { return }
         let uncertainResolutionMessage = self.execApprovalUncertainties[inboxKey]?.message
-        let preserveActiveResolution = uncertainResolutionMessage != nil || self.isExecApprovalResolutionWriteInFlight(
+        // Attempt presence, not writeInFlight: resolution paths settle the write before
+        // awaiting readback classification, and taps stay fenced until the lease drops.
+        let preserveActiveResolution = uncertainResolutionMessage != nil || self.hasActiveExecApprovalResolutionAttempt(
             approvalID: prompt.id,
             gatewayStableID: prompt.gatewayStableID)
         self.pendingExecApprovalPromptSurfaceGeneration &+= 1
@@ -8596,14 +8613,12 @@ extension NodeAppModel {
         }
 
         #if DEBUG
-        if let testExecApprovalResolutionHandler {
-            let outcome = await testExecApprovalResolutionHandler(
-                approvalID,
-                decision,
-                expectedGatewayStableID)
-            if let resolutionAttempt {
-                self.markExecApprovalResolutionWriteSettled(resolutionAttempt)
-            }
+        if let outcome = await self.testExecApprovalResolutionOutcome(
+            approvalID: approvalID,
+            decision: decision,
+            expectedGatewayStableID: expectedGatewayStableID,
+            resolutionAttempt: resolutionAttempt)
+        {
             return outcome
         }
         #endif
@@ -8718,6 +8733,34 @@ extension NodeAppModel {
                 operatorRoute: context.route)
         }
     }
+
+    #if DEBUG
+    /// Stubbed resolve transport for tests; nil when no handler is installed.
+    private func testExecApprovalResolutionOutcome(
+        approvalID: String,
+        decision: String,
+        expectedGatewayStableID: String,
+        resolutionAttempt: ExecApprovalResolutionAttempt?) async -> ExecApprovalResolutionOutcome?
+    {
+        guard let testExecApprovalResolutionHandler else { return nil }
+        let outcome = await testExecApprovalResolutionHandler(
+            approvalID,
+            decision,
+            expectedGatewayStableID)
+        if let resolutionAttempt {
+            self.markExecApprovalResolutionWriteSettled(resolutionAttempt)
+        }
+        if self.testExecApprovalResolutionReconcilesUnknownAck {
+            // Mirror the production unknown-ack path: the settled write's outcome is
+            // classified by canonical readback while the attempt lease stays active.
+            return await self.reconcileUnknownExecApprovalResolution(
+                approvalId: approvalID,
+                gatewayStableID: expectedGatewayStableID,
+                operatorRoute: nil)
+        }
+        return outcome
+    }
+    #endif
 
     private func execApprovalRPCFamily(route: GatewayNodeSessionRoute) async -> ExecApprovalRPCFamily {
         let unifiedGet = await self.operatorGateway.supportsServerMethod(
@@ -8845,10 +8888,12 @@ extension NodeAppModel {
         }
     }
 
+    /// `operatorRoute` is nil only from the DEBUG unknown-ack seam, where the stubbed
+    /// fetch handler owns route admission instead of an operator session lease.
     private func reconcileUnknownExecApprovalResolution(
         approvalId: String,
         gatewayStableID: String,
-        operatorRoute: GatewayNodeSessionRoute) async -> ExecApprovalResolutionOutcome
+        operatorRoute: GatewayNodeSessionRoute?) async -> ExecApprovalResolutionOutcome
     {
         switch await self.fetchExecApprovalPrompt(
             approvalId: approvalId,
@@ -10056,6 +10101,16 @@ extension NodeAppModel {
         self.testExecApprovalResolutionHandler = { approvalID, decision, gatewayStableID in
             let message = await handler(approvalID, decision, gatewayStableID)
             return .uncertain(message: message)
+        }
+    }
+
+    /// Routes DEBUG resolves through the production unknown-ack path: the write settles
+    /// immediately, then canonical readback (the DEBUG fetch handler) classifies the
+    /// outcome while the attempt lease is still active.
+    func _test_setExecApprovalResolutionUnknownAck() {
+        self.testExecApprovalResolutionReconcilesUnknownAck = true
+        self.testExecApprovalResolutionHandler = { _, _, _ in
+            .failed(message: "unknown_ack_outcome_replaced_by_readback")
         }
     }
 
