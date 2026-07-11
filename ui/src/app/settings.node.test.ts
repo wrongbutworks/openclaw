@@ -205,7 +205,7 @@ describe("loadSettings default gateway URL derivation", () => {
       splitRatio: 0.6,
       navCollapsed: false,
       navWidth: 258,
-      sidebarPinnedRoutes: ["overview"],
+      sidebarPinnedRoutes: ["overview", "cron"],
       sidebarMoreExpanded: false,
       textScale: 100,
       sessionsByGateway: {
@@ -390,7 +390,7 @@ describe("loadSettings default gateway URL derivation", () => {
     persisted.navWidth = 220;
     localStorage.setItem(scopedKey, JSON.stringify(persisted));
 
-    expect(loadSettings().sidebarPinnedRoutes).toEqual(["overview"]);
+    expect(loadSettings().sidebarPinnedRoutes).toEqual(["overview", "cron"]);
     expect(loadSettings().sidebarMoreExpanded).toBe(false);
     expect(loadSettings().navWidth).toBe(258);
   });
