@@ -16,6 +16,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -900,6 +901,45 @@ class GatewayExecApprovalRuntimeTest {
 
       // compareAndSet semantics: a close tap captured for the first notice must leave
       // the replacement untouched; only dismissing the rendered notice clears it.
+      runtime.dismissExecApprovalsNotice(staleNotice)
+      assertEquals(replacement, runtime.execApprovalsNotice.value)
+
+      runtime.dismissExecApprovalsNotice(replacement)
+      assertNull(runtime.execApprovalsNotice.value)
+    }
+
+  @Test
+  fun staleDismissCannotClearStructurallyEqualReplacementNotice() =
+    runBlocking {
+      val runtime = createTestRuntime()
+      seedConnectedRuntime(runtime, unifiedMethods)
+      seedApproval(runtime)
+      runtime.gatewayDataRequestOverrideForTests = { _, method, _ ->
+        when (method) {
+          "approval.resolve" -> unifiedResolve(applied = false, status = "denied", decision = "deny")
+          "approval.get" -> unifiedGet(status = "pending", decision = null)
+          else -> error("unexpected method $method")
+        }
+      }
+
+      runtime.resolveExecApproval("approval-1", "allow-once")
+      waitUntil { runtime.execApprovals.value.isEmpty() }
+      val staleNotice = requireNotNull(runtime.execApprovalsNotice.value)
+
+      // The same approval id is re-requested and loses again: the replacement notice
+      // carries identical id/message/warning but is a distinct publication.
+      invokeApprovalEvent(runtime, "exec.approval.requested", """{"id":"approval-1"}""")
+      waitUntil { runtime.execApprovals.value.map { it.id } == listOf("approval-1") }
+      runtime.resolveExecApproval("approval-1", "allow-once")
+      waitUntil { runtime.execApprovals.value.isEmpty() }
+      val replacement = requireNotNull(runtime.execApprovalsNotice.value)
+      assertEquals(staleNotice.approvalId, replacement.approvalId)
+      assertEquals(staleNotice.message, replacement.message)
+      assertEquals(staleNotice.warning, replacement.warning)
+      assertNotEquals(staleNotice, replacement)
+
+      // A close tap captured for the first banner must not clear the equal-looking
+      // replacement outcome the user has not acknowledged yet.
       runtime.dismissExecApprovalsNotice(staleNotice)
       assertEquals(replacement, runtime.execApprovalsNotice.value)
 

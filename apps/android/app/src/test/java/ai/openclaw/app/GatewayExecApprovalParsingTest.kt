@@ -405,38 +405,26 @@ class GatewayExecApprovalParsingTest {
 
   @Test
   fun localAndRemoteTerminalNoticesPreserveCanonicalOutcome() {
-    assertEquals(
-      GatewayExecApprovalNotice(
-        approvalId = "approval-1",
-        message = "A prior response already denied this approval.",
-        warning = true,
-      ),
+    // Field comparison: every constructed notice carries a distinct publication token,
+    // so whole-value equality would never hold across separately built notices.
+    assertNoticeContent(
       gatewayExecApprovalRemoteTerminalNotice(
         terminal(status = GatewayApprovalTerminalStatus.Denied, decision = "deny"),
       ),
+      message = "A prior response already denied this approval.",
+      warning = true,
     )
-    assertEquals(
-      GatewayExecApprovalNotice(
-        approvalId = "approval-1",
-        message = "This approval expired before it could be resolved.",
-        warning = true,
-      ),
+    assertNoticeContent(
       gatewayExecApprovalRemoteTerminalNotice(terminal(status = GatewayApprovalTerminalStatus.Expired)),
+      message = "This approval expired before it could be resolved.",
+      warning = true,
     )
-    assertEquals(
-      GatewayExecApprovalNotice(
-        approvalId = "approval-1",
-        message = "This approval was cancelled before it could be resolved.",
-        warning = true,
-      ),
+    assertNoticeContent(
       gatewayExecApprovalRemoteTerminalNotice(terminal(status = GatewayApprovalTerminalStatus.Cancelled)),
+      message = "This approval was cancelled before it could be resolved.",
+      warning = true,
     )
-    assertEquals(
-      GatewayExecApprovalNotice(
-        approvalId = "approval-1",
-        message = "A prior response already allowed this command and saved the choice.",
-        warning = false,
-      ),
+    assertNoticeContent(
       gatewayExecApprovalResolutionNotice(
         resolution(
           applied = false,
@@ -444,13 +432,10 @@ class GatewayExecApprovalParsingTest {
           decision = "allow-always",
         ),
       ),
+      message = "A prior response already allowed this command and saved the choice.",
+      warning = false,
     )
-    assertEquals(
-      GatewayExecApprovalNotice(
-        approvalId = "approval-1",
-        message = "Gateway recorded approval and saved the choice.",
-        warning = false,
-      ),
+    assertNoticeContent(
       gatewayExecApprovalResolutionNotice(
         resolution(
           applied = false,
@@ -459,13 +444,10 @@ class GatewayExecApprovalParsingTest {
           attribution = GatewayExecApprovalResolutionAttribution.Unknown,
         ),
       ),
+      message = "Gateway recorded approval and saved the choice.",
+      warning = false,
     )
-    assertEquals(
-      GatewayExecApprovalNotice(
-        approvalId = "approval-1",
-        message = "Gateway recorded a denial.",
-        warning = true,
-      ),
+    assertNoticeContent(
       gatewayExecApprovalResolutionNotice(
         resolution(
           applied = false,
@@ -474,7 +456,20 @@ class GatewayExecApprovalParsingTest {
           attribution = GatewayExecApprovalResolutionAttribution.Unknown,
         ),
       ),
+      message = "Gateway recorded a denial.",
+      warning = true,
     )
+  }
+
+  private fun assertNoticeContent(
+    notice: GatewayExecApprovalNotice,
+    approvalId: String = "approval-1",
+    message: String,
+    warning: Boolean,
+  ) {
+    assertEquals(approvalId, notice.approvalId)
+    assertEquals(message, notice.message)
+    assertEquals(warning, notice.warning)
   }
 
   @Test

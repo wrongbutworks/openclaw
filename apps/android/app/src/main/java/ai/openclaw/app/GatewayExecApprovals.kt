@@ -11,6 +11,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import java.util.concurrent.atomic.AtomicLong
 
 data class GatewayExecApprovalSummary(
   val id: String,
@@ -63,10 +64,16 @@ internal enum class GatewayExecApprovalResolutionAttribution {
   Unknown,
 }
 
+private val execApprovalNoticePublications = AtomicLong()
+
 data class GatewayExecApprovalNotice(
   val approvalId: String,
   val message: String,
   val warning: Boolean,
+  // Distinct per constructed notice: a re-requested approval can lose again with an
+  // identical id/message, and the dismiss compareAndSet must not treat the stale
+  // banner as equal to its replacement.
+  val publication: Long = execApprovalNoticePublications.incrementAndGet(),
 )
 
 internal fun gatewayExecApprovalResolutionNotice(
