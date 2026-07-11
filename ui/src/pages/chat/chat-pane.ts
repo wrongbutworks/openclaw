@@ -82,7 +82,6 @@ import {
   renderBackgroundTasksToggle,
   type BackgroundTasksProps,
 } from "./components/chat-background-tasks.ts";
-import { configureToolTitleFetcher } from "./tool-titles.ts";
 import { renderChatControls } from "./components/chat-controls.ts";
 import {
   chatPullRequestId,
@@ -115,6 +114,7 @@ import {
 } from "./run-lifecycle.ts";
 import { scheduleChatScroll } from "./scroll.ts";
 import { clearChatMessagesFromCache } from "./session-message-cache.ts";
+import { configureToolTitleFetcher } from "./tool-titles.ts";
 
 type ChatPageContext = ApplicationContext;
 type PaneSessionChangeOptions = { replace?: boolean };
@@ -1234,18 +1234,24 @@ class ChatPane extends OpenClawLightDomElement {
     const sessionWorkspace = createSessionWorkspaceProps(state, {
       narrowLayout: this.paneWidth < WORKSPACE_RAIL_SIDE_MIN_PANE_WIDTH,
     });
-    const backgroundTasks = createBackgroundTasksProps(state, {
-      onOpenSession: (sessionKey) => {
-        this.onPaneSessionChange?.(this.paneId, sessionKey);
-      },
-    });
     const railSideDocked =
       !sessionWorkspace.collapsed &&
       !sessionWorkspace.narrowLayout &&
       sessionWorkspace.dock !== "bottom";
-    // Every open side rail (workspace and/or background tasks) narrows the
-    // room left for the chat + detail split.
-    const sideRailCount = (railSideDocked ? 1 : 0) + (backgroundTasks.collapsed ? 0 : 1);
+    // The workspace rail claims the side slot first; the tasks rail needs
+    // room for both columns before it may side-dock next to it.
+    const backgroundTasks = createBackgroundTasksProps(state, {
+      narrowLayout:
+        this.paneWidth <
+        WORKSPACE_RAIL_SIDE_MIN_PANE_WIDTH + (railSideDocked ? WORKSPACE_RAIL_MAX_WIDTH : 0),
+      onOpenSession: (sessionKey) => {
+        this.onPaneSessionChange?.(this.paneId, sessionKey);
+      },
+    });
+    const tasksSideDocked = !backgroundTasks.collapsed && !backgroundTasks.narrowLayout;
+    // Every side-docked rail narrows the room left for the chat + detail
+    // split; bottom strips do not.
+    const sideRailCount = (railSideDocked ? 1 : 0) + (tasksSideDocked ? 1 : 0);
     const detailSplitWidth = this.paneWidth - sideRailCount * WORKSPACE_RAIL_MAX_WIDTH;
     const props: ChatProps = {
       paneId: this.paneId,
