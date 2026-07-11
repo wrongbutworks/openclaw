@@ -1613,6 +1613,169 @@ private func overrideNotificationServingPreference(_ enabled: Bool) -> () -> Voi
         #expect(appModel._test_pendingExecApprovalInboxItems().isEmpty)
     }
 
+    @Test @MainActor func `gateway switch during uncertain resolve keeps owner frozen after switching back`() async throws {
+        NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState()
+        defer { NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState() }
+        let appModel = NodeAppModel(
+            notificationCenter: MockBootstrapNotificationCenter(),
+            watchMessagingService: MockWatchMessagingService())
+        defer { appModel.disconnectGateway() }
+        let options = GatewayConnectOptions(
+            role: "node",
+            scopes: [],
+            caps: [],
+            commands: [],
+            permissions: [:],
+            clientId: "ios",
+            clientMode: "node",
+            clientDisplayName: "Phone")
+        let gatewayA = try GatewayConnectConfig(
+            url: #require(URL(string: "wss://127.0.0.1:1")),
+            stableID: "gateway-a",
+            tls: nil,
+            token: "token-a",
+            bootstrapToken: nil,
+            password: nil,
+            nodeOptions: options)
+        let gatewayB = try GatewayConnectConfig(
+            url: #require(URL(string: "wss://127.0.0.1:2")),
+            stableID: "gateway-b",
+            tls: nil,
+            token: "token-b",
+            bootstrapToken: nil,
+            password: nil,
+            nodeOptions: options)
+        let approvalID = "approval-switch-mid-uncertain"
+        let prompt = try #require(NodeAppModel._test_makeExecApprovalPrompt(
+            id: approvalID,
+            gatewayStableID: gatewayA.effectiveStableID,
+            commandText: "echo switch",
+            allowedDecisions: ["allow-once", "deny"],
+            host: "gateway-a",
+            nodeId: nil,
+            agentId: "main",
+            expiresAtMs: 4_000_000_000_000))
+
+        appModel.applyGatewayConnectConfig(gatewayA)
+        appModel._test_presentExecApprovalPrompt(prompt)
+        let writeGate = ExecApprovalResolutionGate()
+        appModel._test_setExecApprovalResolutionUncertainHandler { _, _, _ in
+            await writeGate.waitForFirstCall()
+        }
+
+        let pendingWrite = Task { @MainActor in
+            await appModel.resolvePendingExecApprovalPrompt(decision: "allow-once")
+        }
+        let deadline = ContinuousClock().now.advanced(by: .seconds(2))
+        while await !writeGate.hasStarted(), ContinuousClock().now < deadline {
+            await Task.yield()
+        }
+        #expect(await writeGate.hasStarted())
+        appModel.applyGatewayConnectConfig(gatewayB)
+        await writeGate.resume()
+        await pendingWrite.value
+
+        // The invalidated attempt must not surface UI on the newly selected gateway,
+        // but the lost outcome must survive as an owner-scoped readback candidate.
+        #expect(appModel._test_pendingExecApprovalPrompt() == nil)
+        #expect(appModel._test_pendingPersistedExecApprovalReadbacks().contains { readback in
+            readback.approvalId == approvalID && readback.gatewayStableID == gatewayA.effectiveStableID
+        })
+
+        appModel.applyGatewayConnectConfig(gatewayA)
+        appModel._test_presentExecApprovalPrompt(prompt)
+        #expect(appModel._test_pendingExecApprovalState().resolving)
+        #expect(appModel._test_pendingExecApprovalState().error == "simulated approval write failure")
+
+        let restoredModel = NodeAppModel(
+            notificationCenter: MockBootstrapNotificationCenter(),
+            watchMessagingService: MockWatchMessagingService())
+        restoredModel._test_presentExecApprovalPrompt(prompt)
+        #expect(restoredModel._test_pendingExecApprovalState().resolving)
+        #expect(restoredModel._test_pendingExecApprovalState().error == "simulated approval write failure")
+    }
+
+    @Test @MainActor func `gateway switch during uncertain watch resolve records owner uncertainty`() async throws {
+        NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState()
+        defer { NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState() }
+        let appModel = NodeAppModel(
+            notificationCenter: MockBootstrapNotificationCenter(),
+            watchMessagingService: MockWatchMessagingService())
+        defer { appModel.disconnectGateway() }
+        let options = GatewayConnectOptions(
+            role: "node",
+            scopes: [],
+            caps: [],
+            commands: [],
+            permissions: [:],
+            clientId: "ios",
+            clientMode: "node",
+            clientDisplayName: "Phone")
+        let gatewayA = try GatewayConnectConfig(
+            url: #require(URL(string: "wss://127.0.0.1:1")),
+            stableID: "gateway-a",
+            tls: nil,
+            token: "token-a",
+            bootstrapToken: nil,
+            password: nil,
+            nodeOptions: options)
+        let gatewayB = try GatewayConnectConfig(
+            url: #require(URL(string: "wss://127.0.0.1:2")),
+            stableID: "gateway-b",
+            tls: nil,
+            token: "token-b",
+            bootstrapToken: nil,
+            password: nil,
+            nodeOptions: options)
+        let approvalID = "approval-watch-switch-mid-uncertain"
+        let prompt = try #require(NodeAppModel._test_makeExecApprovalPrompt(
+            id: approvalID,
+            gatewayStableID: gatewayA.effectiveStableID,
+            commandText: "echo watch switch",
+            allowedDecisions: ["allow-once", "deny"],
+            host: "gateway-a",
+            nodeId: nil,
+            agentId: "main",
+            expiresAtMs: 4_000_000_000_000))
+
+        appModel.applyGatewayConnectConfig(gatewayA)
+        appModel._test_presentExecApprovalPrompt(prompt)
+        let writeGate = ExecApprovalResolutionGate()
+        appModel._test_setExecApprovalResolutionUncertainHandler { _, _, _ in
+            await writeGate.waitForFirstCall()
+        }
+
+        let watchResolve = Task { @MainActor in
+            await appModel._test_handleWatchExecApprovalResolve(WatchExecApprovalResolveEvent(
+                replyId: "watch-switch-mid-uncertain",
+                approvalId: approvalID,
+                gatewayStableID: gatewayA.effectiveStableID,
+                decision: .allowOnce,
+                sentAtMs: nil,
+                transport: "test"))
+        }
+        let deadline = ContinuousClock().now.advanced(by: .seconds(2))
+        while await !writeGate.hasStarted(), ContinuousClock().now < deadline {
+            await Task.yield()
+        }
+        #expect(await writeGate.hasStarted())
+        appModel.applyGatewayConnectConfig(gatewayB)
+        await writeGate.resume()
+        let completed = await watchResolve.value
+
+        // The Watch decision was written with an unknown outcome: consume it, keep the
+        // owner-scoped uncertainty + readback record instead of dropping every trace.
+        #expect(completed)
+        #expect(appModel._test_pendingPersistedExecApprovalReadbacks().contains { readback in
+            readback.approvalId == approvalID && readback.gatewayStableID == gatewayA.effectiveStableID
+        })
+
+        appModel.applyGatewayConnectConfig(gatewayA)
+        appModel._test_presentExecApprovalPrompt(prompt)
+        #expect(appModel._test_pendingExecApprovalState().resolving)
+        #expect(appModel._test_pendingExecApprovalState().error == "simulated approval write failure")
+    }
+
     @Test @MainActor func `canonically equivalent gateway owners stay distinct across switch and resolve`() async throws {
         NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState()
         defer { NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState() }
@@ -6341,18 +6504,39 @@ private func overrideNotificationServingPreference(_ enabled: Bool) -> () -> Voi
                 OpenClawWatchExecApprovalSnapshotRequestMessage.self,
                 from: Data(#"{"type":"watch.execApproval.snapshotRequest","requestId":"legacy"}"#.utf8))
         }
+        // Shipped Watch binaries request snapshots with neither requestId nor heldApprovals.
+        let shippedShapeRequest = try #require(
+            WatchMessagingPayloadCodec.parseExecApprovalSnapshotRequestPayload([
+                "type": OpenClawWatchPayloadType.execApprovalSnapshotRequest.rawValue,
+            ], transport: "sendMessage"))
+        #expect(!shippedShapeRequest.requestId.isEmpty)
+        #expect(shippedShapeRequest.heldApprovals.isEmpty)
+        #expect(shippedShapeRequest.gatewayStableID == nil)
+        let missingHeldApprovalsRequest = try #require(
+            WatchMessagingPayloadCodec.parseExecApprovalSnapshotRequestPayload([
+                "type": OpenClawWatchPayloadType.execApprovalSnapshotRequest.rawValue,
+                "requestId": "missing-held-approvals",
+            ], transport: "applicationContext"))
+        #expect(missingHeldApprovalsRequest.requestId == "missing-held-approvals")
+        #expect(missingHeldApprovalsRequest.heldApprovals.isEmpty)
+        let missingRequestIdRequest = try #require(
+            WatchMessagingPayloadCodec.parseExecApprovalSnapshotRequestPayload([
+                "type": OpenClawWatchPayloadType.execApprovalSnapshotRequest.rawValue,
+                "heldApprovals": [],
+            ], transport: "applicationContext"))
+        #expect(!missingRequestIdRequest.requestId.isEmpty)
+        let emptyRequestIdRequest = try #require(
+            WatchMessagingPayloadCodec.parseExecApprovalSnapshotRequestPayload([
+                "type": OpenClawWatchPayloadType.execApprovalSnapshotRequest.rawValue,
+                "requestId": "",
+                "heldApprovals": [],
+            ], transport: "applicationContext"))
+        #expect(!emptyRequestIdRequest.requestId.isEmpty)
+        // A present heldApprovals key keeps strict rejection when malformed.
         #expect(WatchMessagingPayloadCodec.parseExecApprovalSnapshotRequestPayload([
             "type": OpenClawWatchPayloadType.execApprovalSnapshotRequest.rawValue,
-            "requestId": "missing-held-approvals",
-        ], transport: "applicationContext") == nil)
-        #expect(WatchMessagingPayloadCodec.parseExecApprovalSnapshotRequestPayload([
-            "type": OpenClawWatchPayloadType.execApprovalSnapshotRequest.rawValue,
-            "heldApprovals": [],
-        ], transport: "applicationContext") == nil)
-        #expect(WatchMessagingPayloadCodec.parseExecApprovalSnapshotRequestPayload([
-            "type": OpenClawWatchPayloadType.execApprovalSnapshotRequest.rawValue,
-            "requestId": "",
-            "heldApprovals": [],
+            "requestId": "malformed-held-approvals-shape",
+            "heldApprovals": "not-an-array",
         ], transport: "applicationContext") == nil)
         #expect(WatchMessagingPayloadCodec.parseExecApprovalSnapshotRequestPayload([
             "type": OpenClawWatchPayloadType.execApprovalSnapshotRequest.rawValue,
