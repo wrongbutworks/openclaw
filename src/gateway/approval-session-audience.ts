@@ -120,19 +120,7 @@ function createRuntimeApprovalSessionAudienceSources(
   return {
     canonicalizeSessionKey: (sessionKey, relativeToSessionKey) => {
       if (!relativeToSessionKey) {
-        const ownerAgentId = normalizeAgentId(sourceAgentId ?? resolveDefaultAgentId(cfg));
-        // Unscoped source aliases (e.g. "child", "main") must resolve against
-        // the raising agent's store, not the default agent's, or multi-agent
-        // audiences route to the wrong session streams.
-        const lowered = sessionKey.trim().toLowerCase();
-        const scoped =
-          parseAgentSessionKey(sessionKey) || lowered === "global" || lowered === "unknown"
-            ? sessionKey
-            : `agent:${ownerAgentId}:${sessionKey}`;
-        const canonical = resolveSessionStoreKey({ cfg, sessionKey: scoped });
-        // Storage uses the bare global sentinel, while live session streams are
-        // agent-scoped so one agent cannot receive another's global events.
-        return resolveApprovalSourceStreamKey(canonical, ownerAgentId);
+        return canonicalizeApprovalSourceStreamKey(cfg, sessionKey, sourceAgentId);
       }
       const relativeAgentId = resolveSessionStoreAgentId(cfg, relativeToSessionKey);
       const canonical = canonicalizeSpawnedByForAgent(cfg, relativeAgentId, sessionKey);
@@ -161,6 +149,43 @@ export function resolveApprovalSessionAudience(
     sourceSessionKey,
     sources: createRuntimeApprovalSessionAudienceSources(cfg, sourceAgentId),
   });
+}
+
+/** Canonicalize one source key against config: agent scoping, main-key aliases, global sentinel. */
+function canonicalizeApprovalSourceStreamKey(
+  cfg: OpenClawConfig,
+  sessionKey: string,
+  sourceAgentId?: string | null,
+): string {
+  const ownerAgentId = normalizeAgentId(sourceAgentId ?? resolveDefaultAgentId(cfg));
+  // Unscoped source aliases (e.g. "child", "main") must resolve against the
+  // raising agent's store, not the default agent's, or multi-agent audiences
+  // route to the wrong session streams.
+  const lowered = sessionKey.trim().toLowerCase();
+  const scoped =
+    parseAgentSessionKey(sessionKey) || lowered === "global" || lowered === "unknown"
+      ? sessionKey
+      : `agent:${ownerAgentId}:${sessionKey}`;
+  const canonical = resolveSessionStoreKey({ cfg, sessionKey: scoped });
+  // Storage uses the bare global sentinel, while live session streams are
+  // agent-scoped so one agent cannot receive another's global events.
+  return resolveApprovalSourceStreamKey(canonical, ownerAgentId);
+}
+
+/**
+ * Fallback audience key when the lineage walk fails. Config-only
+ * canonicalization (agent scope, configured main-key aliases) still applies
+ * when the config loads; the pure-string form is the true last resort.
+ */
+export function resolveApprovalFallbackAudienceSessionKey(
+  sourceSessionKey: string,
+  sourceAgentId?: string | null,
+): string {
+  try {
+    return canonicalizeApprovalSourceStreamKey(getRuntimeConfig(), sourceSessionKey, sourceAgentId);
+  } catch {
+    return resolveApprovalSourceStreamKey(sourceSessionKey, sourceAgentId);
+  }
 }
 
 /** Best-effort stream key used when lineage lookup is unavailable. */

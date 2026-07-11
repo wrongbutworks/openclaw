@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  resolveApprovalFallbackAudienceSessionKey,
   resolveApprovalSessionAudience,
   resolveApprovalSessionAudienceFromSources,
   resolveApprovalSourceStreamKey,
   type ApprovalSessionAudienceSources,
 } from "./approval-session-audience.js";
 
+const getRuntimeConfigMock = vi.fn(() => ({}) as object);
 vi.mock("../config/io.js", () => ({
-  getRuntimeConfig: () => ({}),
+  getRuntimeConfig: () => getRuntimeConfigMock(),
 }));
 vi.mock("../agents/subagent-registry-read.js", () => ({
   buildLatestSubagentRunReadIndex: () => ({ getLatestSubagentRun: () => undefined }),
@@ -156,6 +158,20 @@ describe("resolveApprovalSessionAudienceFromSources", () => {
     expect(audience).toHaveLength(64);
     expect(audience[0]).toBe("session-0");
     expect(audience.at(-1)).toBe("session-63");
+  });
+});
+
+describe("resolveApprovalFallbackAudienceSessionKey", () => {
+  it("canonicalizes configured main-key aliases when config loads", () => {
+    getRuntimeConfigMock.mockReturnValueOnce({ session: { mainKey: "boss" } });
+    expect(resolveApprovalFallbackAudienceSessionKey("main", "work")).toBe("agent:work:boss");
+  });
+
+  it("scopes unscoped aliases even when config loading throws", () => {
+    getRuntimeConfigMock.mockImplementationOnce(() => {
+      throw new Error("config unavailable");
+    });
+    expect(resolveApprovalFallbackAudienceSessionKey("child", "work")).toBe("agent:work:child");
   });
 });
 

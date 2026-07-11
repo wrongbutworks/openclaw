@@ -12,8 +12,8 @@ import type {
 import { resolveTimerTimeoutMs } from "../shared/number-coercion.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
 import {
+  resolveApprovalFallbackAudienceSessionKey,
   resolveApprovalSessionAudience,
-  resolveApprovalSourceStreamKey,
 } from "./approval-session-audience.js";
 import {
   consumeOperatorApprovalAllowOnce,
@@ -279,7 +279,9 @@ export class ExecApprovalManager<TPayload = ExecApprovalRequestPayload> {
         } catch {
           // Lineage is routing metadata, not an approval safety prerequisite.
           // Preserve at least the source audience when session stores are unavailable.
-          audienceSessionKeys = [resolveApprovalSourceStreamKey(source.sessionKey, source.agentId)];
+          audienceSessionKeys = [
+            resolveApprovalFallbackAudienceSessionKey(source.sessionKey, source.agentId),
+          ];
         }
       }
       const inserted = insertOperatorApproval({
