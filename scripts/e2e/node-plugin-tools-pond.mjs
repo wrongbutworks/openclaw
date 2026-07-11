@@ -2,6 +2,8 @@
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import { createRequire } from "node:module";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -9,6 +11,11 @@ import process from "node:process";
 const DEFAULT_PORT = 18789;
 const SESSION_KEY = "agent:main:main";
 const PLUGIN_ID = "pond-node-tools";
+const MCP_PLUGIN_ID = "node-mcp";
+const MCP_SERVER_NAME = "pond";
+const MCP_TOOL_NAME = "pond_echo";
+const SKILL_NAME = "pond-node-skill";
+const require = createRequire(import.meta.url);
 let verboseOutput = false;
 
 function parseArgs(argv) {
@@ -47,6 +54,27 @@ function now() {
 
 function proofToken() {
   return `pond-proof-${crypto.randomBytes(12).toString("hex")}`;
+}
+
+async function availableLoopbackPort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  await new Promise((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+  if (!port) {
+    throw new Error("failed to allocate pond gateway port");
+  }
+  return port;
+}
+
+function logStep(message) {
+  console.log(`[pond-proof] ${message}`);
 }
 
 async function writeJson(filePath, value, options = {}) {
@@ -132,13 +160,53 @@ export default {
   return pluginDir;
 }
 
-async function prepareRoleState(baseDir, role, token, nodeLabel) {
+async function writeProofMcpServer(rootDir) {
+  const serverPath = path.join(rootDir, "mcp", "pond-echo.mjs");
+  const sdkMcpServerPath = require.resolve("@modelcontextprotocol/sdk/server/mcp.js");
+  const sdkStdioServerPath = require.resolve("@modelcontextprotocol/sdk/server/stdio.js");
+  const zodPath = require.resolve("zod");
+  await fs.mkdir(path.dirname(serverPath), { recursive: true });
+  const source = `#!/usr/bin/env node
+import { McpServer } from ${JSON.stringify(sdkMcpServerPath)};
+import { StdioServerTransport } from ${JSON.stringify(sdkStdioServerPath)};
+import { z } from ${JSON.stringify(zodPath)};
+
+const server = new McpServer({ name: "pond-echo-fixture", version: "1.0.0" });
+
+server.tool(
+  ${JSON.stringify(MCP_TOOL_NAME)},
+  "Echo a pond proof payload.",
+  { text: z.string() },
+  async ({ text }) => ({
+    content: [{ type: "text", text: JSON.stringify({ text }) }],
+  }),
+);
+
+await server.connect(new StdioServerTransport());
+`;
+  await fs.writeFile(serverPath, source, { encoding: "utf8", mode: 0o755 });
+  return serverPath;
+}
+
+async function writeProofSkill(stateDir, proof) {
+  const skillPath = path.join(stateDir, "skills", SKILL_NAME, "SKILL.md");
+  const content = `---\nname: ${SKILL_NAME}\ndescription: Pond node-hosted skill proof\n---\n\n# Pond node skill\n\nProof token: ${proof}\n`;
+  await fs.mkdir(path.dirname(skillPath), { recursive: true });
+  await fs.writeFile(skillPath, content, "utf8");
+  return skillPath;
+}
+
+async function prepareRoleState(baseDir, role, token, nodeLabel, options = {}) {
   const rootDir = path.resolve(baseDir, role);
   const stateDir = path.join(rootDir, "state");
   const configPath = path.join(rootDir, "openclaw.json");
   await fs.mkdir(rootDir, { recursive: true, mode: 0o700 });
   await fs.chmod(rootDir, 0o700);
   const pluginPath = await writeProofPlugin(rootDir, nodeLabel);
+  const mcpServerPath = options.nodeSurfaces ? await writeProofMcpServer(rootDir) : undefined;
+  const skillPath = options.nodeSurfaces
+    ? await writeProofSkill(stateDir, options.skillProofToken)
+    : undefined;
   await writeJson(
     configPath,
     {
@@ -146,12 +214,29 @@ async function prepareRoleState(baseDir, role, token, nodeLabel) {
         mode: "local",
         bind: "lan",
         auth: { mode: "token", token },
-        nodes: { allowCommands: ["pond.echo"] },
+        nodes: { allowCommands: ["pond.echo", "system.run"] },
       },
+      tools: { exec: { host: "node", security: "full", ask: "off" } },
       plugins: {
         load: { paths: [pluginPath] },
         entries: { [PLUGIN_ID]: { enabled: true } },
       },
+      ...(mcpServerPath
+        ? {
+            nodeHost: {
+              mcp: {
+                servers: {
+                  [MCP_SERVER_NAME]: {
+                    command: process.execPath,
+                    args: [mcpServerPath],
+                    transport: "stdio",
+                  },
+                },
+              },
+              skills: { enabled: true },
+            },
+          }
+        : {}),
     },
     { mode: 0o600 },
   );
@@ -163,7 +248,16 @@ async function prepareRoleState(baseDir, role, token, nodeLabel) {
       model: "gpt-5.5",
     },
   });
-  return { rootDir, stateDir, configPath, pluginPath };
+  await writeJson(
+    path.join(stateDir, "exec-approvals.json"),
+    {
+      version: 1,
+      defaults: { security: "full", ask: "off" },
+      agents: {},
+    },
+    { mode: 0o600 },
+  );
+  return { rootDir, stateDir, configPath, pluginPath, mcpServerPath, skillPath };
 }
 
 function childEnv(state, token, nodeLabel) {
@@ -416,6 +510,7 @@ async function waitForProofNodes(rpc, count) {
             connected: node.connected,
             commands: node.commands,
             nodePluginTools: node.nodePluginTools,
+            nodeSkills: node.nodeSkills,
           })),
         ),
       );
@@ -433,7 +528,27 @@ function flattenEffectiveTools(result) {
 async function readEffectiveProofTools(rpc) {
   const result = await rpc.request("tools.effective", { sessionKey: SESSION_KEY });
   return flattenEffectiveTools(result).filter(
-    (tool) => tool.pluginId === PLUGIN_ID && tool.id.startsWith("pond_echo"),
+    (tool) =>
+      tool.pluginId === PLUGIN_ID && (tool.id === "pond_echo" || tool.id.endsWith("_pond_echo")),
+  );
+}
+
+async function readEffectiveMcpProofTools(rpc) {
+  const result = await rpc.request("tools.effective", { sessionKey: SESSION_KEY });
+  return flattenEffectiveTools(result).filter(
+    (tool) => tool.pluginId === MCP_PLUGIN_ID && tool.id.startsWith("pond_"),
+  );
+}
+
+async function readProofSkills(rpc) {
+  const result = await rpc.request("skills.status", { agentId: "main" });
+  const locatorSuffix = `/skills/${SKILL_NAME}/SKILL.md`;
+  return (result?.skills ?? []).filter(
+    (skill) =>
+      skill.name === SKILL_NAME &&
+      skill.source === "openclaw-node" &&
+      skill.filePath.startsWith("node://") &&
+      skill.filePath.endsWith(locatorSuffix),
   );
 }
 
@@ -456,6 +571,30 @@ async function invokeProofTools(rpc, tools) {
     outputs.push({ tool: tool.id, output: result.output?.details ?? result.output });
   }
   return outputs;
+}
+
+async function invokeMcpProofTool(rpc, tool, proof) {
+  const result = await rpc.request(
+    "tools.invoke",
+    {
+      name: tool.id,
+      sessionKey: SESSION_KEY,
+      args: { text: proof },
+      idempotencyKey: `pond-mcp-${now()}`,
+    },
+    { timeoutMs: 45_000 },
+  );
+  if (!result?.ok) {
+    throw new Error(`tools.invoke failed for ${tool.id}: ${JSON.stringify(result)}`);
+  }
+  const output = result.output?.details ?? result.output;
+  const texts = (output?.content ?? [])
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text);
+  if (!texts.some((text) => text.includes(proof))) {
+    throw new Error(`MCP proof token missing from ${tool.id} output: ${JSON.stringify(output)}`);
+  }
+  return { tool: tool.id, output };
 }
 
 async function runVerify({ url, token, expectedNodes }) {
@@ -534,7 +673,10 @@ async function runNode(args) {
   const baseDir = String(
     args.baseDir || (await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-node-plugin-tools-"))),
   );
-  const state = await prepareRoleState(baseDir, nodeId, token, nodeId);
+  const state = await prepareRoleState(baseDir, nodeId, token, nodeId, {
+    nodeSurfaces: args["plugin-only"] !== true,
+    skillProofToken: String(args.skillProofToken || proofToken()),
+  });
   console.log(JSON.stringify({ role: "node", nodeId, host, port, tokenSet: true }));
   const child = spawnOpenClaw(
     [
@@ -561,18 +703,26 @@ async function runNode(args) {
 
 async function runLocal(args) {
   const token = String(args.token || proofToken());
-  const port = Number(args.port || DEFAULT_PORT);
+  const mcpProofToken = proofToken();
+  const skillProofToken = proofToken();
+  const port = args.port ? Number(args.port) : await availableLoopbackPort();
   const baseDir = String(
     args.baseDir || (await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-node-plugin-tools-"))),
   );
   const gatewayState = await prepareRoleState(baseDir, "gateway", token, "gateway");
   const nodeAState = await prepareRoleState(baseDir, "pond-a", token, "pond-a");
-  const nodeBState = await prepareRoleState(baseDir, "pond-b", token, "pond-b");
+  const nodeBState = await prepareRoleState(baseDir, "pond-b", token, "pond-b", {
+    nodeSurfaces: true,
+    skillProofToken,
+  });
   const children = [];
-  if (!args.skipBuild) {
+  if (args.build === true) {
+    logStep("building OpenClaw");
     await runCommand("pnpm", ["build"], {
       stdio: args.verbose ? "inherit" : ["ignore", "ignore", "ignore"],
     });
+  } else {
+    logStep("using existing OpenClaw build (pass --build to rebuild)");
   }
   const childOptions = (state, label) => ({
     env: childEnv(state, token, label),
@@ -585,6 +735,7 @@ async function runLocal(args) {
     },
   });
   try {
+    logStep("starting gateway");
     children.push(
       spawnOpenClaw(
         [
@@ -609,6 +760,7 @@ async function runLocal(args) {
       rpc.close();
       return true;
     });
+    logStep("starting pond-a and pond-b node hosts");
     children.push(
       spawnOpenClaw(
         [
@@ -645,12 +797,26 @@ async function runLocal(args) {
     );
     const rpc = await connectVerifier(url, token);
     try {
+      logStep("waiting for node plugin tools, MCP tool, and node skill publication");
       await waitForProofNodes(rpc, 2);
       const initialTools = await waitFor("two effective proof tools", 30_000, async () => {
         const tools = await readEffectiveProofTools(rpc);
         return tools.length === 2 ? tools : null;
       });
       const initialOutputs = await invokeProofTools(rpc, initialTools);
+      const initialMcpTools = await waitFor("one effective MCP proof tool", 30_000, async () => {
+        const tools = await readEffectiveMcpProofTools(rpc);
+        return tools.length === 1 ? tools : null;
+      });
+      const initialMcpOutput = await invokeMcpProofTool(rpc, initialMcpTools[0], mcpProofToken);
+      const initialSkills = await waitFor("node skill in skills.status", 30_000, async () => {
+        const skills = await readProofSkills(rpc);
+        return skills.length === 1 ? skills : null;
+      });
+      if (!(await fs.readFile(nodeBState.skillPath, "utf8")).includes(skillProofToken)) {
+        throw new Error("node skill fixture proof token missing before publication assertion");
+      }
+      logStep("stopping pond-b and verifying all three published surfaces disappear");
       await terminate(children.pop());
       await waitFor("pond-b offline", 30_000, async () => {
         const result = await rpc.request("node.list", {});
@@ -664,6 +830,15 @@ async function runLocal(args) {
           return tools.length === 1 ? tools : null;
         },
       );
+      await waitFor("MCP proof tool removed after offline", 30_000, async () => {
+        const tools = await readEffectiveMcpProofTools(rpc);
+        return tools.length === 0;
+      });
+      await waitFor("node skill removed after offline", 30_000, async () => {
+        const skills = await readProofSkills(rpc);
+        return skills.length === 0;
+      });
+      logStep("restarting pond-b and verifying publication returns");
       const restartedB = spawnOpenClaw(
         [
           "node",
@@ -690,6 +865,24 @@ async function runLocal(args) {
         },
       );
       const afterReconnectOutputs = await invokeProofTools(rpc, afterReconnectTools);
+      const afterReconnectMcpTools = await waitFor(
+        "MCP proof tool after reconnect",
+        30_000,
+        async () => {
+          const tools = await readEffectiveMcpProofTools(rpc);
+          return tools.length === 1 ? tools : null;
+        },
+      );
+      const afterReconnectMcpOutput = await invokeMcpProofTool(
+        rpc,
+        afterReconnectMcpTools[0],
+        mcpProofToken,
+      );
+      const afterReconnectSkills = await waitFor("node skill after reconnect", 30_000, async () => {
+        const skills = await readProofSkills(rpc);
+        return skills.length === 1 ? skills : null;
+      });
+      logStep("all node-hosted surface checks passed");
       console.log(
         JSON.stringify(
           {
@@ -698,9 +891,15 @@ async function runLocal(args) {
             baseDir,
             initialTools,
             initialOutputs,
+            initialMcpTools,
+            initialMcpOutput,
+            initialSkills,
             afterOfflineTools,
             afterReconnectTools,
             afterReconnectOutputs,
+            afterReconnectMcpTools,
+            afterReconnectMcpOutput,
+            afterReconnectSkills,
           },
           null,
           2,
@@ -717,7 +916,7 @@ async function runLocal(args) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   verboseOutput = args.verbose === true;
-  const mode = args._[0];
+  const mode = args._[0] ?? "local";
   if (mode === "gateway") {
     await runGateway(args);
     return;
@@ -742,7 +941,9 @@ async function main() {
     await runLocal(args);
     return;
   }
-  throw new Error("usage: node scripts/e2e/node-plugin-tools-pond.mjs <local|gateway|node|verify>");
+  throw new Error(
+    "usage: node scripts/e2e/node-plugin-tools-pond.mjs [local|gateway|node|verify] [--build]",
+  );
 }
 
 main().catch(
