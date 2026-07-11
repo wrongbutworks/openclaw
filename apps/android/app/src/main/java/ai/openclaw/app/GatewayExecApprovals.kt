@@ -176,6 +176,8 @@ internal enum class GatewayApprovalRpcFamily {
 }
 
 /** Selects one read/write family for the lifetime of a Gateway hello catalog. */
+// Legacy exec.approval.* fallback serves shipped Gateway v4 peers; remove when the
+// minimum supported gateway advertises approval.get/approval.resolve.
 internal fun selectGatewayApprovalRpcFamily(methods: Set<String>): GatewayApprovalRpcFamily {
   val hasCanonicalGet = "approval.get" in methods
   val hasCanonicalResolve = "approval.resolve" in methods
@@ -481,6 +483,8 @@ private fun JsonObject.strictNonNegativeLong(key: String): Long? =
     ?.longOrNull
     ?.takeIf { it >= 0 }
 
+// Closed-schema contract: the gateway protocol declares approval results with
+// additionalProperties:false, so additive protocol changes hard-fail old clients by design.
 private fun JsonObject.hasExactKeys(expected: Set<String>): Boolean = keys == expected
 
 private fun JsonObject.hasOnlyKeys(allowed: Set<String>): Boolean = keys.all(allowed::contains)

@@ -1762,6 +1762,12 @@ class NodeRuntime private constructor(
     }
   }
 
+  fun dismissExecApprovalsNotice() {
+    synchronized(execApprovalsStateLock) {
+      _execApprovalsNotice.value = null
+    }
+  }
+
   fun refreshChannels() {
     if (mode == NodeRuntimeMode.ScreenshotFixture) return
     scope.launch {
@@ -4705,7 +4711,9 @@ class NodeRuntime private constructor(
     publishGatewayData(gatewayScope) {
       _execApprovalsRefreshing.value = true
       _execApprovalsErrorText.value = null
-      _execApprovalsNotice.value = null
+      // The terminal notice reports an outcome the reviewer has not acknowledged yet.
+      // Refresh must not wipe it; it clears on user dismissal, a replacement terminal
+      // notice, a re-requested approval with the same id, or gateway teardown.
     }
     if (!operatorConnected) {
       publishGatewayData(gatewayScope) {
@@ -4922,6 +4930,10 @@ class NodeRuntime private constructor(
         methodsSnapshot.approvalRpcFamily == GatewayApprovalRpcFamily.Legacy &&
         isGatewayExecApprovalAlreadyResolved(err.gatewayError)
       ) {
+        // Mirror the success path: the rejection settled the request, so mark it
+        // finished first. The epoch-guarded publish below can be skipped by a methods
+        // epoch bump, and a write left requestInFlight would never reconcile.
+        markExecApprovalWriteRequestFinished(pendingWrite)
         handleLegacyExecApprovalAlreadyResolved(gatewayScope, methodsSnapshot, pendingWrite)
       } else {
         handleExecApprovalResolveFailure(

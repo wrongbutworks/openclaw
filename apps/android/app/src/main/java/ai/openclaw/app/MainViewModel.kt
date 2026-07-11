@@ -876,6 +876,10 @@ class MainViewModel(
     ensureRuntime().resolveExecApproval(id = id, decision = decision)
   }
 
+  fun dismissExecApprovalsNotice() {
+    ensureRuntime().dismissExecApprovalsNotice()
+  }
+
   fun refreshChannels() {
     ensureRuntime().refreshChannels()
   }

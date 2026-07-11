@@ -106,6 +106,7 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.GraphicEq
@@ -568,8 +569,10 @@ private fun ApprovalsSettingsScreen(
         Text(text = execApprovalsErrorText ?: "", style = ClawTheme.type.body, color = ClawTheme.colors.warning)
       }
     }
-    execApprovalEmptyInboxNotice(execApprovalsNotice, execApprovals)?.let { notice ->
-      ExecApprovalNotice(notice)
+    // Terminal outcomes always retire their card first, so the notice renders as a
+    // standalone banner above the list; it stays visible until the user dismisses it.
+    execApprovalsNotice?.let { notice ->
+      ExecApprovalNotice(notice = notice, onDismiss = viewModel::dismissExecApprovalsNotice)
     }
     if (!isConnected) {
       ClawPanel {
@@ -588,7 +591,6 @@ private fun ApprovalsSettingsScreen(
     } else {
       ExecApprovalsPanel(
         approvals = execApprovals,
-        notice = execApprovalsNotice,
         onResolve = viewModel::resolveExecApproval,
       )
     }
@@ -1916,14 +1918,12 @@ internal data class SettingsMetric(
 @Composable
 private fun ExecApprovalsPanel(
   approvals: List<GatewayExecApprovalSummary>,
-  notice: GatewayExecApprovalNotice?,
   onResolve: (String, String) -> Unit,
 ) {
   Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
     approvals.forEach { approval ->
       ExecApprovalCard(
         approval = approval,
-        notice = execApprovalNoticeForCard(notice, approval.id),
         onResolve = onResolve,
       )
     }
@@ -1933,7 +1933,6 @@ private fun ExecApprovalsPanel(
 @Composable
 private fun ExecApprovalCard(
   approval: GatewayExecApprovalSummary,
-  notice: GatewayExecApprovalNotice?,
   onResolve: (String, String) -> Unit,
 ) {
   val resolving = approval.resolvingDecision != null
@@ -1956,7 +1955,6 @@ private fun ExecApprovalCard(
       approval.errorText?.let { errorText ->
         Text(text = errorText, style = ClawTheme.type.caption, color = ClawTheme.colors.warning)
       }
-      notice?.let { ExecApprovalNotice(it) }
       Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         execApprovalActions(approval.allowedDecisions).forEach { action ->
           if (action.decision == "allow-once") {
@@ -2014,24 +2012,31 @@ internal fun execApprovalActions(allowedDecisions: List<String>): List<ExecAppro
     }
   }
 
-internal fun execApprovalNoticeForCard(
-  notice: GatewayExecApprovalNotice?,
-  approvalId: String,
-): GatewayExecApprovalNotice? = notice?.takeIf { it.approvalId == approvalId }
-
-internal fun execApprovalEmptyInboxNotice(
-  notice: GatewayExecApprovalNotice?,
-  approvals: List<GatewayExecApprovalSummary>,
-): GatewayExecApprovalNotice? = notice?.takeIf { approvals.isEmpty() }
-
 @Composable
-private fun ExecApprovalNotice(notice: GatewayExecApprovalNotice) {
+private fun ExecApprovalNotice(
+  notice: GatewayExecApprovalNotice,
+  onDismiss: () -> Unit,
+) {
   ClawPanel {
-    Text(
-      text = notice.message,
-      style = ClawTheme.type.body,
-      color = if (notice.warning) ClawTheme.colors.warning else ClawTheme.colors.success,
-    )
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+      Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(
+          text = notice.message,
+          style = ClawTheme.type.body,
+          color = if (notice.warning) ClawTheme.colors.warning else ClawTheme.colors.success,
+        )
+        // The retired card is gone by the time this renders; keep the id association
+        // so the outcome stays attributable while other approval cards remain visible.
+        Text(
+          text = "Approval ${notice.approvalId}",
+          style = ClawTheme.type.caption,
+          color = ClawTheme.colors.textSubtle,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
+      }
+      ClawPlainIconButton(icon = Icons.Default.Close, contentDescription = "Dismiss approval notice", onClick = onDismiss)
+    }
   }
 }
 
