@@ -406,6 +406,10 @@ import {
   NodePluginToolDescriptorSchema,
   type NodePluginToolsUpdateParams,
   NodePluginToolsUpdateParamsSchema,
+  type NodeSkillDescriptor,
+  NodeSkillDescriptorSchema,
+  type NodeSkillsUpdateParams,
+  NodeSkillsUpdateParamsSchema,
   type NodeRenameParams,
   NodeRenameParamsSchema,
   type PollParams,
@@ -844,6 +848,9 @@ export const validateNodeRenameParams = lazyCompile<NodeRenameParams>(NodeRename
 export const validateNodeListParams = lazyCompile<NodeListParams>(NodeListParamsSchema);
 export const validateNodePluginToolsUpdateParams = lazyCompile<NodePluginToolsUpdateParams>(
   NodePluginToolsUpdateParamsSchema,
+);
+export const validateNodeSkillsUpdateParams = lazyCompile<NodeSkillsUpdateParams>(
+  NodeSkillsUpdateParamsSchema,
 );
 export const validateEnvironmentsListParams = lazyCompile<EnvironmentsListParams>(
   EnvironmentsListParamsSchema,
@@ -1311,6 +1318,8 @@ export {
   NodeListParamsSchema,
   NodePluginToolDescriptorSchema,
   NodePluginToolsUpdateParamsSchema,
+  NodeSkillDescriptorSchema,
+  NodeSkillsUpdateParamsSchema,
   NodePendingAckParamsSchema,
   NodeInvokeParamsSchema,
   NodeEventResultSchema,
@@ -1788,6 +1797,8 @@ export type {
   NodeListParams,
   NodePluginToolDescriptor,
   NodePluginToolsUpdateParams,
+  NodeSkillDescriptor,
+  NodeSkillsUpdateParams,
   NodeInvokeParams,
   NodeInvokeResultParams,
   NodeEventParams,

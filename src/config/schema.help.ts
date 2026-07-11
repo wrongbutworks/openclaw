@@ -649,6 +649,9 @@ export const FIELD_HELP: Record<string, string> = {
     "Controls whether paired nodes may publish agent-visible plugin tool descriptors.",
   "gateway.nodes.pluginTools.enabled":
     "Accept agent-visible plugin tool descriptors published by paired nodes (default: true). Set false to ignore and remove all node-published plugin tools.",
+  "gateway.nodes.skills": "Controls whether paired nodes may publish agent-visible skills.",
+  "gateway.nodes.skills.enabled":
+    "Accept skills published by paired nodes while they are connected (default: true). Set false to ignore node-published skills.",
   "gateway.nodes.allowCommands":
     "Extra node.invoke commands to allow beyond the gateway defaults (array of command strings). Enabling dangerous commands here is a security-sensitive override and is flagged by `openclaw security audit`.",
   "gateway.nodes.denyCommands":
@@ -665,6 +668,10 @@ export const FIELD_HELP: Record<string, string> = {
     "Use MCP servers started by the headless node host and published to its paired gateway as agent tools. Restart the node host after changing this section.",
   "nodeHost.mcp.servers":
     "Named MCP server definitions local to this node. Uses the same server shape as mcp.servers; OAuth servers are not supported by the node host.",
+  "nodeHost.skills":
+    "Use this section to publish skills installed in ~/.openclaw/skills from the headless node host. Restart the node host after changing skill files.",
+  "nodeHost.skills.enabled":
+    "Scan and publish node-hosted skills after connecting (default: true). Set false to disable node skill publication.",
   media:
     "Top-level media behavior shared across providers and tools that handle inbound files. Keep defaults unless you need stable filenames for external processing pipelines or longer-lived inbound media retention.",
   "media.preserveFilenames":

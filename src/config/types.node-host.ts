@@ -14,4 +14,9 @@ export type NodeHostConfig = {
   mcp?: {
     servers?: Record<string, McpServerConfig>;
   };
+  /** Skills published by the headless node host. */
+  skills?: {
+    /** Scan and publish ~/.openclaw/skills (default: true). */
+    enabled?: boolean;
+  };
 };

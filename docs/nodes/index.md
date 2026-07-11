@@ -182,6 +182,35 @@ including node-hosted MCP tools, with
 `gateway.nodes.pluginTools.enabled: false`. Exact command denies such as
 `gateway.nodes.denyCommands: ["mcp.tools.call.v1"]` also block execution.
 
+### Node-hosted skills
+
+Install skills under the node machine's active OpenClaw skills directory,
+`~/.openclaw/skills` by default. `OPENCLAW_HOME`, `OPENCLAW_STATE_DIR`, and
+`OPENCLAW_CONFIG_PATH` move that active profile. `OPENCLAW_STATE_DIR` takes
+precedence for skills; otherwise, `skills/` is beside the path printed by
+`openclaw config file`. The headless node host publishes valid `SKILL.md` files
+after it connects, and the Gateway adds them to agent skill snapshots only while
+that node remains connected. Each skill directory name must match the `name`
+frontmatter field so the abstract node locator maps to one entry without adding
+another protocol field.
+
+The initial node-role pairing approves skill publication. Adding, removing, or
+changing skills does not require another pairing or Gateway configuration
+change. Restart `openclaw node run` or `openclaw node restart` after changing
+node skill files; the node host does not watch the skills directory.
+
+Node-hosted skill entries identify their node and carry their execution
+location. Skill files, referenced relative paths, and binaries remain on that
+node. Load instructions and run commands with
+`exec host=node node=<node-id>` so relative paths resolve on the node rather
+than the Gateway machine. The publishing node must have approved `system.run`,
+and the agent's exec policy must allow `host=node`; otherwise the skill stays
+out of that agent's snapshot.
+
+Set `nodeHost.skills.enabled: false` on the node to stop publication. Gateway
+operators can ignore skills from every paired node with
+`gateway.nodes.skills.enabled: false`.
+
 ### Headless identity state
 
 The headless node keeps three separate state files:

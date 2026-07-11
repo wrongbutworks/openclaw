@@ -516,6 +516,11 @@ export type GatewayNodesConfig = {
     /** Accept node-published plugin tool descriptors (default: true). */
     enabled?: boolean;
   };
+  /** Controls whether paired nodes may publish agent-visible skills (default: true). */
+  skills?: {
+    /** Accept node-published skill descriptors (default: true). */
+    enabled?: boolean;
+  };
   /** Additional node.invoke commands to allow on the gateway. */
   allowCommands?: string[];
   /** Commands to deny even if they appear in the defaults or node claims. */

@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   }>,
   mcpConfiguredServerCount: 0,
   mcpDescriptors: [] as Array<Record<string, unknown>>,
+  nodeSkillDescriptors: [] as Array<Record<string, unknown>>,
   closeMcpManager: vi.fn(async () => undefined),
   ensureNodeHostConfig: vi.fn(async () => ({
     version: 1,
@@ -113,6 +114,10 @@ vi.mock("./mcp.js", () => ({
   })),
 }));
 
+vi.mock("./skills.js", () => ({
+  scanNodeHostedSkills: vi.fn(() => mocks.nodeSkillDescriptors),
+}));
+
 function lastCapturedOptions(): GatewayClientOptions | undefined {
   const list = mocks.capturedGatewayClientOptions;
   return list[list.length - 1];
@@ -124,7 +129,11 @@ describe("runNodeHost", () => {
     mocks.capturedGatewayClients.length = 0;
     mocks.mcpConfiguredServerCount = 0;
     mocks.mcpDescriptors = [];
+    mocks.nodeSkillDescriptors = [];
     vi.clearAllMocks();
+    mocks.getRuntimeConfig.mockReturnValue({
+      gateway: { handshakeTimeoutMs: 1_000 },
+    });
   });
 
   it("maps runtime platforms to gateway platform ids", () => {
@@ -185,6 +194,53 @@ describe("runNodeHost", () => {
         },
       ],
     });
+  });
+
+  it("publishes node-hosted skills after gateway hello succeeds", async () => {
+    mocks.nodeSkillDescriptors = [
+      {
+        name: "release-helper",
+        description: "Prepare a release",
+        content: "---\nname: release-helper\ndescription: Prepare a release\n---\n",
+      },
+    ];
+
+    await expect(runNodeHost({ gatewayHost: "127.0.0.1", gatewayPort: 18789 })).rejects.toThrow(
+      "event loop readiness timeout",
+    );
+
+    const options = lastCapturedOptions();
+    expect(mocks.capturedGatewayClients[0]?.request).not.toHaveBeenCalledWith(
+      "node.skills.update",
+      expect.anything(),
+    );
+    options?.onHelloOk?.({
+      protocol: 1,
+      features: { methods: [], events: [] },
+    } as unknown as Parameters<NonNullable<GatewayClientOptions["onHelloOk"]>>[0]);
+    expect(mocks.capturedGatewayClients[0]?.request).toHaveBeenCalledWith("node.skills.update", {
+      skills: mocks.nodeSkillDescriptors,
+    });
+  });
+
+  it("does not publish node-hosted skills when disabled", async () => {
+    mocks.getRuntimeConfig.mockReturnValue({
+      gateway: { handshakeTimeoutMs: 1_000 },
+      nodeHost: { skills: { enabled: false } },
+    } as never);
+
+    await expect(runNodeHost({ gatewayHost: "127.0.0.1", gatewayPort: 18789 })).rejects.toThrow(
+      "event loop readiness timeout",
+    );
+    lastCapturedOptions()?.onHelloOk?.({
+      protocol: 1,
+      features: { methods: [], events: [] },
+    } as unknown as Parameters<NonNullable<GatewayClientOptions["onHelloOk"]>>[0]);
+
+    expect(mocks.capturedGatewayClients[0]?.request).not.toHaveBeenCalledWith(
+      "node.skills.update",
+      expect.anything(),
+    );
   });
 
   it("declares and publishes configured node-host MCP tools", async () => {

@@ -10,6 +10,7 @@ let resolveSkillCommandInvocation: typeof import("./chat-commands.js").resolveSk
 let skillCommandsTesting: typeof import("./chat-commands.js").testing;
 
 const tempDirs: string[] = [];
+const resolveNodeExecEligibilityMock = vi.hoisted(() => vi.fn(() => ({ canExec: false })));
 
 async function makeTempDir(prefix: string) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -136,6 +137,10 @@ vi.mock("../runtime/remote.js", () => ({
   getRemoteSkillEligibility: () => ({}),
 }));
 
+vi.mock("../../agents/exec-defaults.js", () => ({
+  resolveNodeExecEligibility: resolveNodeExecEligibilityMock,
+}));
+
 vi.mock("./agent-filter.js", () => ({
   resolveEffectiveAgentSkillFilter: (
     cfg: {
@@ -169,6 +174,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  resolveNodeExecEligibilityMock.mockReturnValue({ canExec: false });
 });
 
 describe("resolveSkillCommandInvocation", () => {
@@ -283,6 +289,10 @@ describe("listSkillCommandsForAgents", () => {
     });
 
     expectDemoAndExtraSkillCommands(commands);
+    expect(resolveNodeExecEligibilityMock.mock.calls.map(([params]) => params.agentId)).toEqual([
+      "main",
+      "research",
+    ]);
   });
 
   it("deduplicates overlapping allowlists for shared workspace", async () => {
@@ -430,9 +440,19 @@ describe("listSkillCommandsForWorkspace", () => {
         },
       },
       agentId: "alpha",
+      sessionEntry: { execHost: "node", execNode: "build-node" },
+      sessionKey: "agent:alpha:main",
+      execOverrides: { security: "allowlist" },
     });
 
     expect(commands.map((entry) => entry.skillName)).toEqual(["alpha-skill"]);
+    expect(resolveNodeExecEligibilityMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionEntry: { execHost: "node", execNode: "build-node" },
+        sessionKey: "agent:alpha:main",
+        execOverrides: { security: "allowlist" },
+      }),
+    );
   });
 });
 

@@ -19,10 +19,12 @@ export function createGatewayNodeSessionRuntime(params: {
   broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
   listRegisteredNodePluginToolCommands?: NodeRegistryOptions["listRegisteredNodePluginToolCommands"];
   nodePluginToolsEnabled?: boolean;
+  nodeSkillsEnabled?: boolean;
 }) {
   const nodeRegistry = new NodeRegistry({
     listRegisteredNodePluginToolCommands: params.listRegisteredNodePluginToolCommands,
     nodePluginToolsEnabled: params.nodePluginToolsEnabled,
+    nodeSkillsEnabled: params.nodeSkillsEnabled,
   });
   const nodePresenceTimers = new Map<string, ReturnType<typeof setInterval>>();
   const nodeSubscriptions = createNodeSubscriptionManager();

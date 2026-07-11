@@ -7,7 +7,10 @@ import {
   resolveExpiresAtMsFromDurationMs,
   resolveTimerTimeoutMs,
 } from "@openclaw/normalization-core/number-coercion";
-import type { NodePluginToolDescriptor } from "../../packages/gateway-protocol/src/index.js";
+import type {
+  NodePluginToolDescriptor,
+  NodeSkillDescriptor,
+} from "../../packages/gateway-protocol/src/index.js";
 import { logRejectedLargePayload } from "../logging/diagnostic-payload.js";
 import {
   createRegisteredNodePluginToolDescriptorMap,
@@ -16,6 +19,7 @@ import {
   replaceConnectedNodePluginTools,
   type RegisteredNodePluginToolCommand,
 } from "./node-plugin-tool-snapshot.js";
+import { normalizeNodeSkillDescriptors } from "./node-skill-descriptors.js";
 import { MAX_BUFFERED_BYTES } from "./server-constants.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
 
@@ -42,6 +46,7 @@ export type NodeSession = {
   commands: string[];
   declaredNodePluginTools: NodePluginToolDescriptor[];
   nodePluginTools: NodePluginToolDescriptor[];
+  nodeSkills: NodeSkillDescriptor[];
   declaredPermissions?: Record<string, boolean>;
   permissions?: Record<string, boolean>;
   pathEnv?: string;
@@ -120,6 +125,7 @@ export type NodeRegistryOptions = {
     | (() => readonly RegisteredNodePluginToolCommand[] | undefined)
     | undefined;
   nodePluginToolsEnabled?: boolean;
+  nodeSkillsEnabled?: boolean;
 };
 
 /** Serialize an event payload once so fanout can reuse the same JSON string. */
@@ -311,6 +317,7 @@ export class NodeRegistry {
         : undefined;
     const declaredNodePluginTools: NodePluginToolDescriptor[] = [];
     const nodePluginTools: NodePluginToolDescriptor[] = [];
+    const nodeSkills: NodeSkillDescriptor[] = [];
     const session: NodeSession = {
       nodeId,
       connId: client.connId,
@@ -333,6 +340,7 @@ export class NodeRegistry {
       commands,
       declaredNodePluginTools,
       nodePluginTools,
+      nodeSkills,
       declaredPermissions,
       permissions,
       pathEnv,
@@ -499,6 +507,23 @@ export class NodeRegistry {
     }
     node.declaredNodePluginTools = this.options.nodePluginToolsEnabled === false ? [] : [...tools];
     this.replaceEffectiveNodePluginTools(node);
+    return node;
+  }
+
+  updateNodeSkills(
+    nodeId: string,
+    connId: string | undefined,
+    skills: readonly NodeSkillDescriptor[],
+  ): NodeSession | null {
+    const node = this.nodesById.get(nodeId);
+    if (!node || node.connId !== connId) {
+      return null;
+    }
+    node.nodeSkills = normalizeNodeSkillDescriptors({
+      nodeId,
+      skills,
+      enabled: this.options.nodeSkillsEnabled,
+    });
     return node;
   }
   updateSurface(

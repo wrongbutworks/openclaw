@@ -23,6 +23,10 @@ describe("listGatewayMethods", () => {
     expect(listGatewayMethods()).toContain("node.pluginTools.update");
   });
 
+  it("advertises node skill catalog updates", () => {
+    expect(listGatewayMethods()).toContain("node.skills.update");
+  });
+
   it("advertises ClawHub skill trust methods", () => {
     const methods = listGatewayMethods();
     expect(methods).toContain("skills.securityVerdicts");

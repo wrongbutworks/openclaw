@@ -150,6 +150,23 @@ function publishNodePluginTools(
   return registry.updateNodePluginTools("node-1", connId, tools);
 }
 
+function publishNodeSkills(
+  registry: NodeRegistry,
+  skills: Parameters<NodeRegistry["updateNodeSkills"]>[2],
+  connId = "conn-1",
+) {
+  return registry.updateNodeSkills("node-1", connId, skills);
+}
+
+function nodeSkill(name: string, body = "# Instructions") {
+  const description = `${name} description`;
+  return {
+    name,
+    description,
+    content: `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`,
+  };
+}
+
 function registerLinuxNode(registry: NodeRegistry) {
   return registerNode(registry, {
     clientId: "openclaw-node-host",
@@ -1017,6 +1034,52 @@ describe("gateway/node-registry", () => {
     expect(updated).toBeNull();
     expect(registry.get("node-1")?.nodePluginTools).toEqual([]);
     expect(listConnectedNodePluginTools()).toEqual([]);
+  });
+
+  it("stores bounded node-hosted skill updates on the current session", () => {
+    const registry = createTestNodeRegistry();
+    const session = registry.register(makeClient("conn-1", "node-1"), {});
+
+    const updated = publishNodeSkills(registry, [
+      nodeSkill("release-helper"),
+      { ...nodeSkill("broken"), content: "x".repeat(64 * 1024 + 1) },
+    ]);
+
+    expect(updated).toBe(session);
+    expect(session.nodeSkills.map((skill) => skill.name)).toEqual(["release-helper"]);
+  });
+
+  it("enforces node skill count and total-content caps", () => {
+    const registry = createTestNodeRegistry();
+    registry.register(makeClient("conn-1", "node-1"), {});
+
+    const countUpdate = publishNodeSkills(
+      registry,
+      Array.from({ length: 65 }, (_, index) =>
+        nodeSkill(`count-${String(index).padStart(2, "0")}`),
+      ),
+    );
+    expect(countUpdate?.nodeSkills).toHaveLength(64);
+
+    const totalUpdate = publishNodeSkills(
+      registry,
+      Array.from({ length: 9 }, (_, index) =>
+        nodeSkill(`large-${String(index).padStart(2, "0")}`, "x".repeat(60 * 1024)),
+      ),
+    );
+    expect(totalUpdate?.nodeSkills).toHaveLength(8);
+  });
+
+  it("ignores node skills when publication is disabled or the connection is stale", () => {
+    const disabled = new NodeRegistry({ nodeSkillsEnabled: false });
+    disabled.register(makeClient("conn-1", "node-1"), {});
+    expect(publishNodeSkills(disabled, [nodeSkill("disabled")])?.nodeSkills).toEqual([]);
+
+    const registry = createTestNodeRegistry();
+    registry.register(makeClient("conn-old", "node-1"), {});
+    registry.register(makeClient("conn-new", "node-1"), {});
+    expect(publishNodeSkills(registry, [nodeSkill("stale")], "conn-old")).toBeNull();
+    expect(registry.get("node-1")?.nodeSkills).toEqual([]);
   });
 
   it("clears effective permissions when explicitly removed", () => {

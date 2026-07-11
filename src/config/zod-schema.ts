@@ -486,6 +486,12 @@ const NodeHostSchema = z
       })
       .strict()
       .optional(),
+    skills: z
+      .object({
+        enabled: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict()
   .optional();
@@ -1428,6 +1434,12 @@ export const OpenClawSchema = z
               .strict()
               .optional(),
             pluginTools: z
+              .object({
+                enabled: z.boolean().optional(),
+              })
+              .strict()
+              .optional(),
+            skills: z
               .object({
                 enabled: z.boolean().optional(),
               })

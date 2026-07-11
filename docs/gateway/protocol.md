@@ -285,6 +285,14 @@ surface, removes them when the node disconnects, and rejects operator attempts
 to mutate another node's catalog. Set `gateway.nodes.pluginTools.enabled: false`
 to ignore node-published descriptors.
 
+Connected node hosts publish their complete skill replacement catalog with
+`node.skills.update`. This node-role method is the only node skill publication
+path; skills are not accepted in `connect` params. Each descriptor contains a
+safe name, description, and bounded `SKILL.md` content. The Gateway parses that
+content with the normal skills loader, includes it in agent skill snapshots
+while the node is connected, and removes it on disconnect. Set
+`gateway.nodes.skills.enabled: false` to ignore node-published skills.
+
 ## Presence
 
 - `system-presence` returns entries keyed by device identity, including

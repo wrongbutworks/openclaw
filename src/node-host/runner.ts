@@ -40,6 +40,7 @@ import {
   ensureNodeHostPluginRegistry,
   listRegisteredNodeHostCapsAndCommands,
 } from "./plugin-node-host.js";
+import { scanNodeHostedSkills } from "./skills.js";
 
 export { buildNodeInvokeResultParams };
 export { buildNodeEventParams } from "./invoke.js";
@@ -137,6 +138,14 @@ function isUnsupportedNodePluginToolsUpdateError(error: unknown): boolean {
   );
 }
 
+function isUnsupportedNodeSkillsUpdateError(error: unknown): boolean {
+  return (
+    error instanceof GatewayClientRequestError &&
+    error.gatewayCode === "INVALID_REQUEST" &&
+    error.message.includes("unknown method: node.skills.update")
+  );
+}
+
 async function publishNodePluginTools(client: GatewayClient, tools: unknown[]): Promise<void> {
   if (tools.length === 0) {
     return;
@@ -148,6 +157,17 @@ async function publishNodePluginTools(client: GatewayClient, tools: unknown[]): 
       return;
     }
     writeStderrLine(`node host plugin tool publish failed: ${String(error)}`);
+  }
+}
+
+async function publishNodeSkills(client: GatewayClient, skills: unknown[]): Promise<void> {
+  try {
+    await client.request("node.skills.update", { skills });
+  } catch (error) {
+    if (isUnsupportedNodeSkillsUpdateError(error)) {
+      return;
+    }
+    writeStderrLine(`node host skill publish failed: ${String(error)}`);
   }
 }
 
@@ -308,6 +328,7 @@ export async function runNodeHost(opts: NodeHostRunOptions): Promise<void> {
   const pathEnv = ensureNodePathEnv();
   const mcpServers = cfg.nodeHost?.mcp?.servers;
   const hasMcpServers = countConfiguredNodeHostMcpServers(mcpServers) > 0;
+  const nodeSkills = cfg.nodeHost?.skills?.enabled === false ? null : scanNodeHostedSkills();
   const mcpStartupAbort = new AbortController();
   const mcpRuntime: {
     manager?: NodeHostMcpManager;
@@ -372,6 +393,9 @@ export async function runNodeHost(opts: NodeHostRunOptions): Promise<void> {
     onHelloOk: () => {
       writeStderrLine(`node host gateway connected: ${url}`);
       gatewayHelloReceived = true;
+      if (nodeSkills) {
+        void publishNodeSkills(client, nodeSkills);
+      }
       if (mcpRuntime.manager) {
         publishNodeToolsWhenReady();
       } else {

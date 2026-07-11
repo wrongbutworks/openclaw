@@ -8,6 +8,12 @@ const NodePluginToolNameSchema = Type.String({
   pattern: "^[A-Za-z][A-Za-z0-9_-]{0,63}$",
 });
 
+const NodeSkillNameSchema = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  pattern: "^(?!.*--)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$",
+});
+
 /** Pending node work classes that the gateway may queue for paired devices. */
 const NodePendingWorkTypeSchema = Type.String({
   enum: ["status.request", "location.request"],
@@ -111,6 +117,24 @@ export const NodePluginToolDescriptorSchema = Type.Object(
 export const NodePluginToolsUpdateParamsSchema = Type.Object(
   {
     tools: Type.Array(NodePluginToolDescriptorSchema),
+  },
+  { additionalProperties: false },
+);
+
+/** Agent-visible skill descriptor advertised by a connected node. */
+export const NodeSkillDescriptorSchema = Type.Object(
+  {
+    name: NodeSkillNameSchema,
+    description: Type.String({ minLength: 1, maxLength: 1024 }),
+    content: Type.String({ minLength: 1, maxLength: 64 * 1024 }),
+  },
+  { additionalProperties: false },
+);
+
+/** Replaces the connected node's agent-visible skill catalog. */
+export const NodeSkillsUpdateParamsSchema = Type.Object(
+  {
+    skills: Type.Array(NodeSkillDescriptorSchema, { maxItems: 64 }),
   },
   { additionalProperties: false },
 );
