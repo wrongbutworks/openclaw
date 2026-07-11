@@ -1856,6 +1856,62 @@ private func overrideNotificationServingPreference(_ enabled: Bool) -> () -> Voi
         })
     }
 
+    @Test @MainActor func `watch pending retry after unknown ack unlocks the phone card`() async throws {
+        NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState()
+        defer { NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState() }
+        let appModel = NodeAppModel(
+            notificationCenter: MockBootstrapNotificationCenter(),
+            watchMessagingService: MockWatchMessagingService())
+        let approvalID = "approval-watch-unknown-ack-retry"
+        let prompt = try #require(NodeAppModel._test_makeExecApprovalPrompt(
+            id: approvalID,
+            commandText: "echo watch retry",
+            allowedDecisions: ["allow-once", "deny"],
+            host: "gateway",
+            nodeId: nil,
+            agentId: "main",
+            expiresAtMs: 4_000_000_000_000))
+        appModel._test_presentExecApprovalPrompt(prompt)
+        appModel._test_setExecApprovalResolutionUnknownAck()
+        let fetchGate = ExecApprovalResolutionGate()
+        appModel._test_setUnifiedExecApprovalGetResponse(
+            makePendingExecApprovalJSON(approvalID),
+            beforeResponse: { _ = await fetchGate.waitForFirstCall() })
+
+        let watchResolve = Task { @MainActor in
+            await appModel._test_handleWatchExecApprovalResolve(WatchExecApprovalResolveEvent(
+                replyId: "watch-unknown-ack-retry",
+                approvalId: approvalID,
+                gatewayStableID: prompt.gatewayStableID,
+                decision: .allowOnce,
+                sentAtMs: nil,
+                transport: "test"))
+        }
+        let deadline = ContinuousClock().now.advanced(by: .seconds(2))
+        while await !fetchGate.hasStarted(), ContinuousClock().now < deadline {
+            await Task.yield()
+        }
+        #expect(await fetchGate.hasStarted())
+
+        // Re-presenting during the gated readback keeps the card fenced as resolving.
+        appModel._test_presentExecApprovalPrompt(prompt)
+        #expect(appModel._test_pendingExecApprovalState().resolving)
+
+        await fetchGate.resume()
+        let completed = await watchResolve.value
+        #expect(completed)
+
+        // Pending readback settled the watch attempt: the phone card must unlock with
+        // the same retry message the phone path stamps.
+        #expect(!appModel._test_pendingExecApprovalState().resolving)
+        #expect(appModel._test_pendingExecApprovalState().error ==
+            "The previous decision was not recorded. Review and try again.")
+
+        // The released lease admits a fresh resolve that reaches the transport again.
+        await appModel.resolvePendingExecApprovalPrompt(decision: "deny")
+        #expect(await fetchGate.callCount() == 2)
+    }
+
     @Test @MainActor func `gateway switch during uncertain watch resolve records owner uncertainty`() async throws {
         NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState()
         defer { NodeAppModel._test_resetPersistedWatchExecApprovalBridgeState() }

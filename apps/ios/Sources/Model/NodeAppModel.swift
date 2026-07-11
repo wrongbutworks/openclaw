@@ -6932,9 +6932,16 @@ extension NodeAppModel {
         switch outcome {
         case .resolved, .stale:
             return true
-        case .pendingRetry:
+        case let .pendingRetry(message):
             self.markWatchResolutionAttemptResettable(routedEvent)
             self.finishExecApprovalResolutionAttempt(resolutionAttempt)
+            // Readback definitively classified the approval as still pending. The
+            // lease-wide presentation fence left any re-presented phone card resolving,
+            // so releasing the lease must also unlock this exact owner's card.
+            self.unlockPendingExecApprovalPromptForRetry(
+                approvalID: approvalID,
+                gatewayStableID: prompt.gatewayStableID,
+                message: message)
             await self.republishCachedWatchExecApprovalPromptForRetry(
                 approvalID: approvalID,
                 heldAttemptID: routedEvent.replyId)
@@ -6945,19 +6952,32 @@ extension NodeAppModel {
         case let .failed(message):
             self.markWatchResolutionAttemptResettable(routedEvent)
             self.finishExecApprovalResolutionAttempt(resolutionAttempt)
-            if self.pendingExecApprovalPrompt.map({ Self.approvalIDsMatch($0.id, approvalID) }) == true,
-               GatewayStableIdentifier.matches(
-                   self.pendingExecApprovalPrompt?.gatewayStableID,
-                   prompt.gatewayStableID)
-            {
-                self.pendingExecApprovalPromptResolving = false
-                self.pendingExecApprovalPromptErrorText = message
-            }
+            self.unlockPendingExecApprovalPromptForRetry(
+                approvalID: approvalID,
+                gatewayStableID: prompt.gatewayStableID,
+                message: message)
             await self.republishCachedWatchExecApprovalPromptForRetry(
                 approvalID: approvalID,
                 heldAttemptID: routedEvent.replyId)
             return true
         }
+    }
+
+    /// Mirrors the phone path's settled non-terminal handling: when a lease releases
+    /// with the approval still pending (or the write failed), the presented card for
+    /// this exact owner becomes actionable again with the retry message.
+    private func unlockPendingExecApprovalPromptForRetry(
+        approvalID: String,
+        gatewayStableID: String,
+        message: String)
+    {
+        guard self.pendingExecApprovalPrompt.map({ Self.approvalIDsMatch($0.id, approvalID) }) == true,
+              GatewayStableIdentifier.matches(
+                  self.pendingExecApprovalPrompt?.gatewayStableID,
+                  gatewayStableID)
+        else { return }
+        self.pendingExecApprovalPromptResolving = false
+        self.pendingExecApprovalPromptErrorText = message
     }
 
     private enum WatchExecApprovalResolveReadback {
