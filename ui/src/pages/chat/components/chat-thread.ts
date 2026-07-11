@@ -96,7 +96,8 @@ type ChatThreadProps = {
   runActive?: boolean;
   sessions: SessionsListResult | null;
   /** Host context resolving global-alias session keys (scope=global fleets). */
-  sessionHost?: Pick<UiSessionDefaultsHost, "agentsList" | "hello"> | null;
+  /** Includes assistantAgentId so bare-global welcome recents scope to the selected agent. */
+  sessionHost?: UiSessionDefaultsHost | null;
   assistantName: string;
   assistantAvatar: string | null;
   assistantAvatarUrl?: string | null;
@@ -122,6 +123,7 @@ type ChatThreadProps = {
   onSend: () => void;
   onSetReply?: (target: ReplyTarget) => void;
   onFocusComposer?: () => void;
+  onOpenSession?: (sessionKey: string) => void;
 };
 
 type ChatPinnedMessagesProps = Pick<
