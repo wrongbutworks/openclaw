@@ -96,7 +96,6 @@ export type MockGatewayControls = {
   ) => Promise<void>;
   resolveDeferred: (method: string, payload?: unknown) => Promise<void>;
   setOnline: (online: boolean) => Promise<void>;
-  setMethodResponse: (method: string, payload: unknown) => Promise<void>;
   setHistoryMessages: (messages: unknown[]) => Promise<void>;
   setMethodResponse: (method: string, payload: unknown) => Promise<void>;
   waitForRequest: (method: string) => Promise<MockGatewayRequest>;
@@ -320,7 +319,6 @@ function installControlUiMockGateway(input: {
     requests: BrowserRequest[];
     resolveDeferred: (method: string, payload?: unknown) => void;
     setOnline: (online: boolean) => void;
-    setMethodResponse: (method: string, payload: unknown) => void;
     setHistoryMessages: (messages: unknown[]) => void;
     setMethodResponse: (method: string, payload: unknown) => void;
     socketCount: () => number;
@@ -925,6 +923,7 @@ function installControlUiMockGateway(input: {
         return;
       }
       MockWebSocket.latest?.openConnection();
+    },
     setMethodResponse(method, payload) {
       scenario.methodResponses[method] = payload;
       methodResponseOverrides[method] = payload;
@@ -943,9 +942,6 @@ function installControlUiMockGateway(input: {
       if (isRecord(configuredHistory) && !responseCases(configuredHistory)) {
         configuredHistory.messages = scenario.historyMessages;
       }
-    },
-    setMethodResponse(method, payload) {
-      scenario.methodResponses[method] = payload;
     },
     socketCount() {
       return sockets.length;
@@ -1154,23 +1150,6 @@ function createMockGatewayControls(page: Page, defaultSessionKey: string): MockG
         }
         gateway.setOnline(nextOnline);
       }, online);
-    async setMethodResponse(method, payload) {
-      await page.evaluate(
-        ({ targetMethod, responsePayload }) => {
-          const gateway = (
-            window as Window & {
-              openclawControlUiE2eGateway?: {
-                setMethodResponse: (method: string, payload: unknown) => void;
-              };
-            }
-          ).openclawControlUiE2eGateway;
-          if (!gateway) {
-            throw new Error("Mock Gateway is not installed");
-          }
-          gateway.setMethodResponse(targetMethod, responsePayload);
-        },
-        { targetMethod: method, responsePayload: payload },
-      );
     },
     async setHistoryMessages(messages) {
       await page.evaluate((nextMessages) => {
