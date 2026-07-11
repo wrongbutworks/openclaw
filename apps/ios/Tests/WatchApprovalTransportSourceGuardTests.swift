@@ -158,6 +158,7 @@ struct WatchApprovalTransportSourceGuardTests {
     @Test func `watch approval ids remain exact opaque values`() throws {
         let receiverSource = try Self.readWatchSource("WatchConnectivityReceiver.swift")
         let storeSource = try Self.readWatchSource("WatchInboxStore.swift")
+        let messagesSource = try Self.readWatchSource("WatchInboxMessages.swift")
         let parser = try Self.extract(
             receiverSource,
             from: "private static func parseExecApprovalItem(",
@@ -174,12 +175,14 @@ struct WatchApprovalTransportSourceGuardTests {
             storeSource,
             from: "private func restorePersistedState()",
             to: "private func persistState()")
+        // The identity validators live in WatchInboxMessages.swift since the
+        // message/model types were split out of WatchInboxStore.swift.
         let approvalValidator = try Self.extract(
-            storeSource,
+            messagesSource,
             from: "enum WatchApprovalID {",
             to: "enum WatchGatewayID {")
         let gatewayValidator = try Self.extract(
-            storeSource,
+            messagesSource,
             from: "enum WatchGatewayID {",
             to: "struct WatchExecApprovalIdentityKey:")
 
@@ -208,6 +211,7 @@ struct WatchApprovalTransportSourceGuardTests {
 
     @Test func `watch canonical-equivalent approval IDs remain independently targetable`() throws {
         let storeSource = try Self.readWatchSource("WatchInboxStore.swift")
+        let messagesSource = try Self.readWatchSource("WatchInboxMessages.swift")
         let viewSource = try Self.readWatchSource("WatchInboxView.swift")
         let composedID = "approval-\u{00E9}"
         let decomposedID = "approval-e\u{0301}"
@@ -221,13 +225,15 @@ struct WatchApprovalTransportSourceGuardTests {
         let remainingID = try #require(pending[decomposedKey])
         #expect(Array(remainingID.utf8) == Array(decomposedID.utf8))
 
-        #expect(storeSource.contains("self.bytes = Array(rawValue.utf8)"))
-        #expect(storeSource.contains("var id: WatchExecApprovalIdentityKey"))
-        #expect(storeSource.contains("var approvalID: WatchApprovalID.Key"))
-        #expect(storeSource.contains("var gatewayID: WatchGatewayID.Key"))
+        // Byte-exact identity types live in WatchInboxMessages.swift after the split.
+        #expect(messagesSource.contains("self.bytes = Array(rawValue.utf8)"))
+        #expect(messagesSource.contains("var id: WatchExecApprovalIdentityKey"))
+        #expect(messagesSource.contains("var approvalID: WatchApprovalID.Key"))
+        #expect(messagesSource.contains("var gatewayID: WatchGatewayID.Key"))
         #expect(storeSource.contains("WatchApprovalID.key(tombstone.approvalId) == key.approvalID"))
         #expect(storeSource.contains("approvalKey.notificationComponent"))
         #expect(!storeSource.contains("record.id == approval.id"))
+        #expect(!messagesSource.contains("record.id == approval.id"))
         #expect(!storeSource.contains("tombstone.approvalId == key.approvalId"))
         #expect(viewSource.contains("record.approvalID"))
         #expect(viewSource.contains("$0.id == self.record.id"))
@@ -291,6 +297,7 @@ struct WatchApprovalTransportSourceGuardTests {
 
     @Test func `watch compounds exact owner and approval identity`() throws {
         let storeSource = try Self.readWatchSource("WatchInboxStore.swift")
+        let messagesSource = try Self.readWatchSource("WatchInboxMessages.swift")
         let receiverSource = try Self.readWatchSource("WatchConnectivityReceiver.swift")
         let sameApprovalID = Data("approval-same".utf8)
         let composedOwner = Data("gateway-\u{00E9}".utf8)
@@ -298,7 +305,8 @@ struct WatchApprovalTransportSourceGuardTests {
         #expect(composedOwner != decomposedOwner)
         #expect(Set([[composedOwner, sameApprovalID], [decomposedOwner, sameApprovalID]]).count == 2)
 
-        #expect(storeSource.contains("struct WatchExecApprovalIdentityKey: Hashable"))
+        // The compound identity key type lives in WatchInboxMessages.swift after the split.
+        #expect(messagesSource.contains("struct WatchExecApprovalIdentityKey: Hashable"))
         #expect(storeSource.contains("selectedExecApprovalGatewayStableID"))
         #expect(storeSource.contains("gatewayKey.notificationComponent"))
         #expect(storeSource.contains("WatchGatewayID.key(tombstone.gatewayStableID) == key.gatewayID"))
@@ -306,11 +314,13 @@ struct WatchApprovalTransportSourceGuardTests {
         #expect(receiverSource.contains("WatchGatewayID.exact(payload[\"gatewayStableID\"] as? String)"))
         #expect(!receiverSource.contains("gatewayStableID?.trimmingCharacters"))
         #expect(!storeSource.contains("isECMAScriptTrimScalar"))
+        #expect(!messagesSource.contains("isECMAScriptTrimScalar"))
         #expect(Array("\u{0085}gateway".utf8) != Array("gateway".utf8))
     }
 
     @Test func `watch notification identity frames dotted components`() throws {
         let storeSource = try Self.readWatchSource("WatchInboxStore.swift")
+        let messagesSource = try Self.readWatchSource("WatchInboxMessages.swift")
         let promptConsume = try Self.extract(
             storeSource,
             from: "func consume(\n        execApprovalPrompt",
@@ -322,7 +332,9 @@ struct WatchApprovalTransportSourceGuardTests {
         let framedLeft = Self.notificationComponent("a.b") + "." + Self.notificationComponent("c")
         let framedRight = Self.notificationComponent("a") + "." + Self.notificationComponent("b.c")
         #expect(framedLeft != framedRight)
-        #expect(storeSource.contains("0x2D, 0x5F, 0x7E"))
+        // The notification-component percent encoder lives in WatchInboxMessages.swift.
+        #expect(messagesSource.contains("0x2D, 0x5F, 0x7E"))
+        #expect(!messagesSource.contains("0x2D, 0x2E, 0x5F, 0x7E"))
         #expect(!storeSource.contains("0x2D, 0x2E, 0x5F, 0x7E"))
         #expect(storeSource.contains("gatewayKey.notificationComponent).\\(approvalKey.notificationComponent"))
         #expect(storeSource.contains("legacyExecApprovalNotificationIdentifier"))

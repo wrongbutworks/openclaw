@@ -1127,7 +1127,12 @@ extension RootTabsSourceGuardTests {
         #expect(terminalHelpers.contains("upgraded.recordedAt = Date()"))
         #expect(source.contains("execApprovalTerminalTombstoneLifetime: TimeInterval"))
         #expect(source.contains("execApprovalTerminalTombstones: [ExecApprovalTerminalTombstone]?"))
-        #expect(source.contains("var sourceSentAtMs: Int64?"))
+        // WatchExecApprovalRecord's transport timestamp lives in WatchInboxMessages.swift
+        // since the watch message/model types were split out of WatchInboxStore.swift.
+        let messagesSource = try String(
+            contentsOf: Self.watchInboxMessagesSourceURL(),
+            encoding: .utf8)
+        #expect(messagesSource.contains("var sourceSentAtMs: Int64?"))
         #expect(source.contains("var outcomeIsAuthoritative: Bool?"))
         #expect(source.contains("guard let recordSentAtMs = record.sourceSentAtMs else { return true }"))
         #expect(restore.contains("state.execApprovalTerminalTombstones ?? []"))
@@ -1728,6 +1733,13 @@ extension RootTabsSourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("WatchApp/Sources/WatchInboxStore.swift")
+    }
+
+    private static func watchInboxMessagesSourceURL() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("WatchApp/Sources/WatchInboxMessages.swift")
     }
 
     private static func channelsSourceURL() -> URL {

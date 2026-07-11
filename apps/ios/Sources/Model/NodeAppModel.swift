@@ -6455,117 +6455,32 @@ extension NodeAppModel {
         let visiblePromptAtStart = self.pendingExecApprovalPrompt
         let visiblePromptWasResolving = self.pendingExecApprovalPromptResolving
         let surfaceGenerationAtStart = self.pendingExecApprovalPromptSurfaceGeneration
-        var loadedPrompts: [ExecApprovalPrompt] = []
-        var allReadbacksWereAuthoritative = true
 
-        for cachedPrompt in prompts {
-            let persistedReadback = PersistedExecApprovalReadback(
-                approvalId: cachedPrompt.id,
-                gatewayStableID: cachedPrompt.gatewayStableID)
-            let readback = await self.fetchExecApprovalPrompt(
-                approvalId: cachedPrompt.id,
-                sourceReason: reason)
-            switch readback {
-            case let .loaded(prompt):
-                self.upsertWatchExecApprovalPrompt(prompt)
-                self.removePendingPersistedExecApprovalReadback(persistedReadback)
-                loadedPrompts.append(prompt)
-            case let .terminal(terminal):
-                self.removePendingPersistedExecApprovalReadback(persistedReadback)
-                let outcome = await self.applyCanonicalExecApprovalTerminal(
-                    terminal,
-                    appliedHere: false,
-                    gatewayStableID: gatewayStableID,
-                    syncSnapshots: syncSnapshots)
-                if case .failed = outcome {
-                    allReadbacksWereAuthoritative = false
-                }
-            case .stale:
-                self.removePendingPersistedExecApprovalReadback(persistedReadback)
-                self.markPendingExecApprovalTerminal(
-                    approvalId: cachedPrompt.id,
-                    outcome: ExecApprovalOutcome(
-                        text: "This approval is no longer available.",
-                        tone: .warning))
-                await self.publishWatchExecApprovalExpired(
-                    approvalId: cachedPrompt.id,
-                    gatewayStableID: gatewayStableID,
-                    reason: .notFound,
-                    syncSnapshots: syncSnapshots)
-            case .failed:
-                allReadbacksWereAuthoritative = false
-                continue
-            }
-        }
-
-        for persistedReadback in persistedReadbacks {
-            let readback = await self.fetchExecApprovalPrompt(
-                approvalId: persistedReadback.approvalId,
-                sourceReason: "persisted_upgrade")
-            switch readback {
-            case let .loaded(prompt):
-                self.upsertWatchExecApprovalPrompt(prompt)
-                self.removePendingPersistedExecApprovalReadback(persistedReadback)
-                loadedPrompts.append(prompt)
-            case let .terminal(terminal):
-                self.removePendingPersistedExecApprovalReadback(persistedReadback)
-                let outcome = await self.applyCanonicalExecApprovalTerminal(
-                    terminal,
-                    appliedHere: false,
-                    gatewayStableID: gatewayStableID,
-                    syncSnapshots: syncSnapshots)
-                if case .failed = outcome {
-                    allReadbacksWereAuthoritative = false
-                }
-            case .stale:
-                self.removePendingPersistedExecApprovalReadback(persistedReadback)
-                await self.publishWatchExecApprovalExpired(
-                    approvalId: persistedReadback.approvalId,
-                    gatewayStableID: gatewayStableID,
-                    reason: .notFound,
-                    syncSnapshots: syncSnapshots)
-            case .failed:
-                allReadbacksWereAuthoritative = false
-                continue
-            }
-        }
-
+        let cachedPass = await self.readBackCachedWatchExecApprovalPrompts(
+            prompts,
+            gatewayStableID: gatewayStableID,
+            reason: reason,
+            syncSnapshots: syncSnapshots)
+        let persistedPass = await self.readBackPersistedWatchExecApprovalReadbacks(
+            persistedReadbacks,
+            gatewayStableID: gatewayStableID,
+            syncSnapshots: syncSnapshots)
         var classifiedApprovalIDs = cachedApprovalIDs
         classifiedApprovalIDs.formUnion(persistedReadbacks.compactMap {
             Self.execApprovalIDKey($0.approvalId)
         })
-        for heldApproval in heldApprovalsByID.values.sorted(by: {
-            Self.approvalIDSortsBefore($0.approvalId, $1.approvalId)
-        }) {
-            guard let approvalID = Self.execApprovalIDKey(heldApproval.approvalId),
-                  classifiedApprovalIDs.insert(approvalID).inserted
-            else { continue }
-            switch await self.fetchExecApprovalPrompt(
-                approvalId: heldApproval.approvalId,
-                sourceReason: reason)
-            {
-            case let .loaded(prompt):
-                self.upsertWatchExecApprovalPrompt(prompt)
-                loadedPrompts.append(prompt)
-            case let .terminal(terminal):
-                let outcome = await self.applyCanonicalExecApprovalTerminal(
-                    terminal,
-                    appliedHere: false,
-                    gatewayStableID: gatewayStableID,
-                    syncSnapshots: syncSnapshots)
-                if case .failed = outcome {
-                    allReadbacksWereAuthoritative = false
-                }
-            case .stale:
-                await self.publishWatchExecApprovalExpired(
-                    approvalId: heldApproval.approvalId,
-                    gatewayStableID: gatewayStableID,
-                    reason: .notFound,
-                    syncSnapshots: syncSnapshots)
-            case .failed:
-                allReadbacksWereAuthoritative = false
-            }
-        }
+        let heldPass = await self.readBackHeldWatchExecApprovals(
+            heldApprovalsByID,
+            alreadyClassifiedApprovalIDs: classifiedApprovalIDs,
+            gatewayStableID: gatewayStableID,
+            reason: reason,
+            syncSnapshots: syncSnapshots)
+        // Concatenation order mirrors the original readback order: cached prompts,
+        // persisted readbacks, then held Watch approvals.
+        var loadedPrompts = cachedPass.loadedPrompts + persistedPass.loadedPrompts + heldPass.loadedPrompts
+        let allReadbacksWereAuthoritative = cachedPass.allReadbacksWereAuthoritative &&
+            persistedPass.allReadbacksWereAuthoritative &&
+            heldPass.allReadbacksWereAuthoritative
 
         guard allReadbacksWereAuthoritative else { return false }
 
@@ -6642,6 +6557,142 @@ extension NodeAppModel {
                 "The previous decision was not recorded. Review and try again."
         }
         return allReadbacksWereAuthoritative
+    }
+
+    private struct WatchExecApprovalReadbackPass {
+        var loadedPrompts: [ExecApprovalPrompt] = []
+        var allReadbacksWereAuthoritative = true
+    }
+
+    private func readBackCachedWatchExecApprovalPrompts(
+        _ prompts: [ExecApprovalPrompt],
+        gatewayStableID: String,
+        reason: String,
+        syncSnapshots: Bool) async -> WatchExecApprovalReadbackPass
+    {
+        var pass = WatchExecApprovalReadbackPass()
+        for cachedPrompt in prompts {
+            let persistedReadback = PersistedExecApprovalReadback(
+                approvalId: cachedPrompt.id,
+                gatewayStableID: cachedPrompt.gatewayStableID)
+            let readback = await self.fetchExecApprovalPrompt(
+                approvalId: cachedPrompt.id,
+                sourceReason: reason)
+            switch readback {
+            case let .loaded(prompt):
+                self.upsertWatchExecApprovalPrompt(prompt)
+                self.removePendingPersistedExecApprovalReadback(persistedReadback)
+                pass.loadedPrompts.append(prompt)
+            case let .terminal(terminal):
+                self.removePendingPersistedExecApprovalReadback(persistedReadback)
+                let outcome = await self.applyCanonicalExecApprovalTerminal(
+                    terminal,
+                    appliedHere: false,
+                    gatewayStableID: gatewayStableID,
+                    syncSnapshots: syncSnapshots)
+                if case .failed = outcome {
+                    pass.allReadbacksWereAuthoritative = false
+                }
+            case .stale:
+                self.removePendingPersistedExecApprovalReadback(persistedReadback)
+                self.markPendingExecApprovalTerminal(
+                    approvalId: cachedPrompt.id,
+                    outcome: ExecApprovalOutcome(
+                        text: "This approval is no longer available.",
+                        tone: .warning))
+                await self.publishWatchExecApprovalExpired(
+                    approvalId: cachedPrompt.id,
+                    gatewayStableID: gatewayStableID,
+                    reason: .notFound,
+                    syncSnapshots: syncSnapshots)
+            case .failed:
+                pass.allReadbacksWereAuthoritative = false
+            }
+        }
+        return pass
+    }
+
+    private func readBackPersistedWatchExecApprovalReadbacks(
+        _ persistedReadbacks: [PersistedExecApprovalReadback],
+        gatewayStableID: String,
+        syncSnapshots: Bool) async -> WatchExecApprovalReadbackPass
+    {
+        var pass = WatchExecApprovalReadbackPass()
+        for persistedReadback in persistedReadbacks {
+            let readback = await self.fetchExecApprovalPrompt(
+                approvalId: persistedReadback.approvalId,
+                sourceReason: "persisted_upgrade")
+            switch readback {
+            case let .loaded(prompt):
+                self.upsertWatchExecApprovalPrompt(prompt)
+                self.removePendingPersistedExecApprovalReadback(persistedReadback)
+                pass.loadedPrompts.append(prompt)
+            case let .terminal(terminal):
+                self.removePendingPersistedExecApprovalReadback(persistedReadback)
+                let outcome = await self.applyCanonicalExecApprovalTerminal(
+                    terminal,
+                    appliedHere: false,
+                    gatewayStableID: gatewayStableID,
+                    syncSnapshots: syncSnapshots)
+                if case .failed = outcome {
+                    pass.allReadbacksWereAuthoritative = false
+                }
+            case .stale:
+                self.removePendingPersistedExecApprovalReadback(persistedReadback)
+                await self.publishWatchExecApprovalExpired(
+                    approvalId: persistedReadback.approvalId,
+                    gatewayStableID: gatewayStableID,
+                    reason: .notFound,
+                    syncSnapshots: syncSnapshots)
+            case .failed:
+                pass.allReadbacksWereAuthoritative = false
+            }
+        }
+        return pass
+    }
+
+    private func readBackHeldWatchExecApprovals(
+        _ heldApprovalsByID: [ExecApprovalIdentifier.Key: WatchExecApprovalSnapshotRequestItem],
+        alreadyClassifiedApprovalIDs: Set<ExecApprovalIdentifier.Key>,
+        gatewayStableID: String,
+        reason: String,
+        syncSnapshots: Bool) async -> WatchExecApprovalReadbackPass
+    {
+        var pass = WatchExecApprovalReadbackPass()
+        var classifiedApprovalIDs = alreadyClassifiedApprovalIDs
+        for heldApproval in heldApprovalsByID.values.sorted(by: {
+            Self.approvalIDSortsBefore($0.approvalId, $1.approvalId)
+        }) {
+            guard let approvalID = Self.execApprovalIDKey(heldApproval.approvalId),
+                  classifiedApprovalIDs.insert(approvalID).inserted
+            else { continue }
+            switch await self.fetchExecApprovalPrompt(
+                approvalId: heldApproval.approvalId,
+                sourceReason: reason)
+            {
+            case let .loaded(prompt):
+                self.upsertWatchExecApprovalPrompt(prompt)
+                pass.loadedPrompts.append(prompt)
+            case let .terminal(terminal):
+                let outcome = await self.applyCanonicalExecApprovalTerminal(
+                    terminal,
+                    appliedHere: false,
+                    gatewayStableID: gatewayStableID,
+                    syncSnapshots: syncSnapshots)
+                if case .failed = outcome {
+                    pass.allReadbacksWereAuthoritative = false
+                }
+            case .stale:
+                await self.publishWatchExecApprovalExpired(
+                    approvalId: heldApproval.approvalId,
+                    gatewayStableID: gatewayStableID,
+                    reason: .notFound,
+                    syncSnapshots: syncSnapshots)
+            case .failed:
+                pass.allReadbacksWereAuthoritative = false
+            }
+        }
+        return pass
     }
 
     private nonisolated static func watchExecApprovalIDsNeedingFetch(
@@ -6801,42 +6852,16 @@ extension NodeAppModel {
         {
             prompt = cachedPrompt
         } else {
-            let readback = await self.fetchExecApprovalPrompt(
-                approvalId: approvalID,
-                sourceReason: "watch_resolve")
-            guard self.isCurrentExecApprovalReadbackRoute(
-                generation: routeGeneration,
-                stableID: currentGatewayStableID)
-            else {
-                await self.syncWatchExecApprovalSnapshot(reason: "watch_resolve_route_changed")
-                return true
-            }
-            switch readback {
-            case let .loaded(loadedPrompt):
-                guard self.isExecApprovalPromptCurrent(loadedPrompt) else {
-                    await self.syncWatchExecApprovalSnapshot(reason: "watch_resolve_owner_changed")
-                    return true
-                }
-                self.upsertWatchExecApprovalPrompt(loadedPrompt)
+            switch await self.readBackWatchExecApprovalPromptForResolve(
+                approvalID: approvalID,
+                routedEvent: routedEvent,
+                currentGatewayStableID: currentGatewayStableID,
+                routeGeneration: routeGeneration)
+            {
+            case let .prompt(loadedPrompt):
                 prompt = loadedPrompt
-            case let .terminal(terminal):
-                _ = await self.applyCanonicalExecApprovalTerminal(
-                    terminal,
-                    appliedHere: false,
-                    gatewayStableID: currentGatewayStableID)
-                return true
-            case .stale:
-                await self.publishWatchExecApprovalExpired(
-                    approvalId: approvalID,
-                    gatewayStableID: currentGatewayStableID,
-                    reason: .notFound)
-                return true
-            case .failed:
-                // No write was attempted. Retain the owner-bound action for the next
-                // operator connection instead of falsely reporting it as unavailable.
-                self.enqueuePendingWatchExecApprovalResolution(routedEvent)
-                await self.syncWatchExecApprovalSnapshot(reason: "watch_resolve_readback_failed")
-                return false
+            case let .handled(completed):
+                return completed
             }
         }
         guard prompt.allowedDecisions.contains(routedEvent.decision.rawValue) else {
@@ -6892,16 +6917,9 @@ extension NodeAppModel {
         case .pendingRetry:
             self.markWatchResolutionAttemptResettable(routedEvent)
             self.finishExecApprovalResolutionAttempt(resolutionAttempt)
-            if let prompt = Self.execApprovalIDKey(approvalID)
-                .flatMap({ watchExecApprovalPromptsByID[$0] })
-            {
-                await self.publishWatchExecApprovalPrompt(
-                    prompt,
-                    reason: "resolve_retry",
-                    resetResolutionAttemptId: self.resettableWatchResolutionAttemptID(
-                        for: prompt,
-                        heldAttemptID: routedEvent.replyId))
-            }
+            await self.republishCachedWatchExecApprovalPromptForRetry(
+                approvalID: approvalID,
+                heldAttemptID: routedEvent.replyId)
             return true
         case .uncertain:
             // Recorded above, before the attempt gate.
@@ -6917,18 +6935,76 @@ extension NodeAppModel {
                 self.pendingExecApprovalPromptResolving = false
                 self.pendingExecApprovalPromptErrorText = message
             }
-            if let prompt = Self.execApprovalIDKey(approvalID)
-                .flatMap({ watchExecApprovalPromptsByID[$0] })
-            {
-                await self.publishWatchExecApprovalPrompt(
-                    prompt,
-                    reason: "resolve_retry",
-                    resetResolutionAttemptId: self.resettableWatchResolutionAttemptID(
-                        for: prompt,
-                        heldAttemptID: routedEvent.replyId))
-            }
+            await self.republishCachedWatchExecApprovalPromptForRetry(
+                approvalID: approvalID,
+                heldAttemptID: routedEvent.replyId)
             return true
         }
+    }
+
+    private enum WatchExecApprovalResolveReadback {
+        case prompt(ExecApprovalPrompt)
+        case handled(completed: Bool)
+    }
+
+    private func readBackWatchExecApprovalPromptForResolve(
+        approvalID: String,
+        routedEvent: WatchExecApprovalResolveEvent,
+        currentGatewayStableID: String,
+        routeGeneration: UInt64) async -> WatchExecApprovalResolveReadback
+    {
+        let readback = await self.fetchExecApprovalPrompt(
+            approvalId: approvalID,
+            sourceReason: "watch_resolve")
+        guard self.isCurrentExecApprovalReadbackRoute(
+            generation: routeGeneration,
+            stableID: currentGatewayStableID)
+        else {
+            await self.syncWatchExecApprovalSnapshot(reason: "watch_resolve_route_changed")
+            return .handled(completed: true)
+        }
+        switch readback {
+        case let .loaded(loadedPrompt):
+            guard self.isExecApprovalPromptCurrent(loadedPrompt) else {
+                await self.syncWatchExecApprovalSnapshot(reason: "watch_resolve_owner_changed")
+                return .handled(completed: true)
+            }
+            self.upsertWatchExecApprovalPrompt(loadedPrompt)
+            return .prompt(loadedPrompt)
+        case let .terminal(terminal):
+            _ = await self.applyCanonicalExecApprovalTerminal(
+                terminal,
+                appliedHere: false,
+                gatewayStableID: currentGatewayStableID)
+            return .handled(completed: true)
+        case .stale:
+            await self.publishWatchExecApprovalExpired(
+                approvalId: approvalID,
+                gatewayStableID: currentGatewayStableID,
+                reason: .notFound)
+            return .handled(completed: true)
+        case .failed:
+            // No write was attempted. Retain the owner-bound action for the next
+            // operator connection instead of falsely reporting it as unavailable.
+            self.enqueuePendingWatchExecApprovalResolution(routedEvent)
+            await self.syncWatchExecApprovalSnapshot(reason: "watch_resolve_readback_failed")
+            return .handled(completed: false)
+        }
+    }
+
+    private func republishCachedWatchExecApprovalPromptForRetry(
+        approvalID: String,
+        heldAttemptID: String) async
+    {
+        guard let prompt = Self.execApprovalIDKey(approvalID)
+            .flatMap({ self.watchExecApprovalPromptsByID[$0] })
+        else { return }
+        await self.publishWatchExecApprovalPrompt(
+            prompt,
+            reason: "resolve_retry",
+            resetResolutionAttemptId: self.resettableWatchResolutionAttemptID(
+                for: prompt,
+                heldAttemptID: heldAttemptID))
     }
 
     private func ownerScopedWatchExecApprovalEvent(
@@ -7936,22 +8012,82 @@ extension NodeAppModel {
         return true
     }
 
+    private struct ExecApprovalTerminalSnapshotFields {
+        let id: String
+        let urlPath: String
+        let createdAtMs: Int
+        let expiresAtMs: Int
+        let presentation: ApprovalPresentation
+        let resolvedAtMs: Int
+
+        init(_ value: AllowedApprovalSnapshot) {
+            self.init(
+                id: value.id,
+                urlPath: value.urlpath,
+                createdAtMs: value.createdatms,
+                expiresAtMs: value.expiresatms,
+                presentation: value.presentation,
+                resolvedAtMs: value.resolvedatms)
+        }
+
+        init(_ value: DeniedApprovalSnapshot) {
+            self.init(
+                id: value.id,
+                urlPath: value.urlpath,
+                createdAtMs: value.createdatms,
+                expiresAtMs: value.expiresatms,
+                presentation: value.presentation,
+                resolvedAtMs: value.resolvedatms)
+        }
+
+        init(_ value: ExpiredApprovalSnapshot) {
+            self.init(
+                id: value.id,
+                urlPath: value.urlpath,
+                createdAtMs: value.createdatms,
+                expiresAtMs: value.expiresatms,
+                presentation: value.presentation,
+                resolvedAtMs: value.resolvedatms)
+        }
+
+        init(_ value: CancelledApprovalSnapshot) {
+            self.init(
+                id: value.id,
+                urlPath: value.urlpath,
+                createdAtMs: value.createdatms,
+                expiresAtMs: value.expiresatms,
+                presentation: value.presentation,
+                resolvedAtMs: value.resolvedatms)
+        }
+
+        private init(
+            id: String,
+            urlPath: String,
+            createdAtMs: Int,
+            expiresAtMs: Int,
+            presentation: ApprovalPresentation,
+            resolvedAtMs: Int)
+        {
+            self.id = id
+            self.urlPath = urlPath
+            self.createdAtMs = createdAtMs
+            self.expiresAtMs = expiresAtMs
+            self.presentation = presentation
+            self.resolvedAtMs = resolvedAtMs
+        }
+    }
+
     private static func makeExecApprovalTerminalResult(
-        id: String,
+        fields: ExecApprovalTerminalSnapshotFields,
         expectedApprovalID: String,
-        urlPath: String,
-        createdAtMs: Int,
-        expiresAtMs: Int,
-        presentation: ApprovalPresentation,
-        verdict: ExecApprovalTerminalVerdict,
-        resolvedAtMs: Int) -> ExecApprovalTerminalResult?
+        verdict: ExecApprovalTerminalVerdict) -> ExecApprovalTerminalResult?
     {
-        guard self.approvalIDsMatch(id, expectedApprovalID),
-              !urlPath.isEmpty,
-              createdAtMs >= 0,
-              expiresAtMs >= 0,
-              resolvedAtMs >= 0,
-              case let .exec(execPresentation) = presentation,
+        guard self.approvalIDsMatch(fields.id, expectedApprovalID),
+              !fields.urlPath.isEmpty,
+              fields.createdAtMs >= 0,
+              fields.expiresAtMs >= 0,
+              fields.resolvedAtMs >= 0,
+              case let .exec(execPresentation) = fields.presentation,
               self.isValidExecApprovalPresentation(
                   execPresentation,
                   terminalDecision: verdict.decision)
@@ -7959,9 +8095,9 @@ extension NodeAppModel {
             return nil
         }
         return ExecApprovalTerminalResult(
-            id: id,
+            id: fields.id,
             verdict: verdict,
-            resolvedAtMs: Int64(resolvedAtMs))
+            resolvedAtMs: Int64(fields.resolvedAtMs))
     }
 
     private static func makeExecApprovalTerminalResult(
@@ -7980,45 +8116,25 @@ extension NodeAppModel {
                 return nil
             }
             return self.makeExecApprovalTerminalResult(
-                id: value.id,
+                fields: ExecApprovalTerminalSnapshotFields(value),
                 expectedApprovalID: expectedApprovalID,
-                urlPath: value.urlpath,
-                createdAtMs: value.createdatms,
-                expiresAtMs: value.expiresatms,
-                presentation: value.presentation,
-                verdict: verdict,
-                resolvedAtMs: value.resolvedatms)
+                verdict: verdict)
         case let .denied(value):
             guard value.decision == ApprovalDecision.deny.rawValue else { return nil }
             return self.makeExecApprovalTerminalResult(
-                id: value.id,
+                fields: ExecApprovalTerminalSnapshotFields(value),
                 expectedApprovalID: expectedApprovalID,
-                urlPath: value.urlpath,
-                createdAtMs: value.createdatms,
-                expiresAtMs: value.expiresatms,
-                presentation: value.presentation,
-                verdict: .deny,
-                resolvedAtMs: value.resolvedatms)
+                verdict: .deny)
         case let .expired(value):
             return self.makeExecApprovalTerminalResult(
-                id: value.id,
+                fields: ExecApprovalTerminalSnapshotFields(value),
                 expectedApprovalID: expectedApprovalID,
-                urlPath: value.urlpath,
-                createdAtMs: value.createdatms,
-                expiresAtMs: value.expiresatms,
-                presentation: value.presentation,
-                verdict: .expired,
-                resolvedAtMs: value.resolvedatms)
+                verdict: .expired)
         case let .cancelled(value):
             return self.makeExecApprovalTerminalResult(
-                id: value.id,
+                fields: ExecApprovalTerminalSnapshotFields(value),
                 expectedApprovalID: expectedApprovalID,
-                urlPath: value.urlpath,
-                createdAtMs: value.createdatms,
-                expiresAtMs: value.expiresatms,
-                presentation: value.presentation,
-                verdict: .cancelled,
-                resolvedAtMs: value.resolvedatms)
+                verdict: .cancelled)
         }
     }
 
@@ -9780,10 +9896,16 @@ extension NodeAppModel {
         self.presentPendingExecApprovalFromInbox(key)
     }
 
-    func _test_pendingExecApprovalState()
-        -> (resolving: Bool, canDismiss: Bool, error: String?, resolved: String?, tone: ExecApprovalOutcomeTone?)
-    {
-        (
+    struct PendingExecApprovalStateSnapshot {
+        let resolving: Bool
+        let canDismiss: Bool
+        let error: String?
+        let resolved: String?
+        let tone: ExecApprovalOutcomeTone?
+    }
+
+    func _test_pendingExecApprovalState() -> PendingExecApprovalStateSnapshot {
+        PendingExecApprovalStateSnapshot(
             resolving: self.pendingExecApprovalPromptResolving,
             canDismiss: self.pendingExecApprovalPromptCanDismiss,
             error: self.pendingExecApprovalPromptErrorText,
