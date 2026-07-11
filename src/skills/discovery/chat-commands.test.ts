@@ -10,7 +10,9 @@ let resolveSkillCommandInvocation: typeof import("./chat-commands.js").resolveSk
 let skillCommandsTesting: typeof import("./chat-commands.js").testing;
 
 const tempDirs: string[] = [];
-const resolveNodeExecEligibilityMock = vi.hoisted(() => vi.fn(() => ({ canExec: false })));
+const resolveNodeExecEligibilityMock = vi.hoisted(() =>
+  vi.fn((_params: { agentId?: string }) => ({ canExec: false })),
+);
 
 async function makeTempDir(prefix: string) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
