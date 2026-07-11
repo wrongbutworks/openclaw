@@ -1,14 +1,10 @@
 package ai.openclaw.app.ui
 
 import ai.openclaw.app.GatewayConnectionProblem
-import ai.openclaw.app.GatewayExecApprovalNotice
-import ai.openclaw.app.GatewayExecApprovalSummary
 import ai.openclaw.app.GatewayNodeCapabilityApproval
 import ai.openclaw.app.LocationMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.file.Files
@@ -212,51 +208,25 @@ class SettingsScreensTest {
   }
 
   @Test
-  fun approvalNoticeMatchesOnlyTheExactOpaqueApprovalId() {
-    val exactId = "\uFEFF approval-edge \u00A0"
-    val notice =
-      GatewayExecApprovalNotice(
-        approvalId = exactId,
-        message = "Approval denied.",
-        warning = true,
-      )
+  fun terminalNoticeRendersAsStandaloneDismissibleBannerRegardlessOfRemainingCards() {
+    val source = settingsScreensSource()
+    // Terminal outcomes retire their card before the notice publishes, so any
+    // card-scoped or empty-inbox-only rendering hides losing outcomes whenever
+    // another approval card remains visible.
+    assertFalse(source.contains("execApprovalNoticeForCard"))
+    assertFalse(source.contains("execApprovalEmptyInboxNotice"))
+    val screenStart = source.indexOf("private fun ApprovalsSettingsScreen(")
+    val bannerCall = source.indexOf("execApprovalsNotice?.let", screenStart)
+    val listPanelCall = source.indexOf("ExecApprovalsPanel(", screenStart)
+    assertTrue(screenStart >= 0 && bannerCall > screenStart && listPanelCall > bannerCall)
 
-    assertSame(notice, execApprovalNoticeForCard(notice, exactId))
-    assertNull(execApprovalNoticeForCard(notice, "approval-edge"))
-    assertNull(execApprovalNoticeForCard(notice, "\uFEFFapproval-edge\u00A0"))
+    val noticeStart = source.indexOf("private fun ExecApprovalNotice(")
+    val noticeEnd = source.indexOf("@Composable", noticeStart + 1)
+    val noticeBody = source.substring(noticeStart, noticeEnd)
+    assertTrue(noticeBody.contains("onDismiss: () -> Unit"))
+    assertTrue(noticeBody.contains("notice.approvalId"))
+    assertTrue(noticeBody.contains("contentDescription = \"Dismiss approval notice\""))
   }
-
-  @Test
-  fun terminalNoticeIsOrphanedOnlyWhenNoOtherApprovalCardIsVisible() {
-    val notice =
-      GatewayExecApprovalNotice(
-        approvalId = "approval-1",
-        message = "Approval denied.",
-        warning = true,
-      )
-
-    assertSame(notice, execApprovalEmptyInboxNotice(notice, emptyList()))
-    assertNull(
-      execApprovalEmptyInboxNotice(
-        notice,
-        listOf(approvalSummary(id = "approval-2")),
-      ),
-    )
-  }
-
-  private fun approvalSummary(id: String): GatewayExecApprovalSummary =
-    GatewayExecApprovalSummary(
-      id = id,
-      commandText = "echo test",
-      commandPreview = null,
-      warningText = null,
-      allowedDecisions = listOf("deny"),
-      host = null,
-      nodeId = null,
-      agentId = null,
-      createdAtMs = 1,
-      expiresAtMs = 2,
-    )
 
   private fun settingsScreensSource(): String {
     val candidates =

@@ -727,6 +727,101 @@ class GatewayExecApprovalRuntimeTest {
     }
 
   @Test
+  fun legacyAlreadyResolvedRacingMethodsEpochBumpLeavesWriteReconcilable() =
+    runBlocking {
+      val runtime = createTestRuntime()
+      seedConnectedRuntime(runtime, legacyMethods)
+      seedApproval(runtime)
+      val resolveStarted = CompletableDeferred<Unit>()
+      val releaseResolve = CompletableDeferred<Unit>()
+      runtime.gatewayDataRequestOverrideForTests = { _, method, _ ->
+        check(method == "exec.approval.resolve")
+        resolveStarted.complete(Unit)
+        releaseResolve.await()
+        throw GatewayRequestRejected(
+          GatewaySession.ErrorShape(
+            code = "INVALID_REQUEST",
+            message = "approval rejected",
+            details = gatewayErrorDetails("APPROVAL_ALREADY_RESOLVED"),
+          ),
+        )
+      }
+
+      runtime.resolveExecApproval("approval-1", "allow-once")
+      withTimeout(2_000) { resolveStarted.await() }
+      // Replacement hello on the same stable endpoint: the epoch bump makes the
+      // already-resolved publish a no-op, leaving only the pending-write record.
+      invokeReplaceGatewayMethods(runtime, legacyMethods)
+      releaseResolve.complete(Unit)
+      delay(100)
+
+      // The settled rejection must not strand the write as requestInFlight; the next
+      // refresh reconciles it through canonical readback instead of freezing forever.
+      val reconcileMethods = mutableListOf<String>()
+      runtime.gatewayDataRequestOverrideForTests = { _, method, _ ->
+        reconcileMethods += method
+        when (method) {
+          "exec.approval.list" -> "[]"
+          "exec.approval.get" -> legacyGet()
+          else -> error("unexpected method $method")
+        }
+      }
+      runtime.refreshExecApprovals()
+      waitUntil {
+        runtime.execApprovals.value.singleOrNull()?.let { row ->
+          row.resolvingDecision == null &&
+            row.errorText == "The Gateway still shows this approval as pending. Review it before trying again."
+        } == true
+      }
+
+      assertTrue(reconcileMethods.contains("exec.approval.get"))
+    }
+
+  @Test
+  fun terminalNoticeSurvivesRefreshUntilUserDismissal() =
+    runBlocking {
+      val runtime = createTestRuntime()
+      seedConnectedRuntime(runtime, unifiedMethods)
+      seedApprovals(
+        runtime,
+        listOf(
+          approvalSummary(id = "approval-1", commandText = "echo losing"),
+          approvalSummary(id = "approval-2", commandText = "echo retained"),
+        ),
+      )
+      runtime.gatewayDataRequestOverrideForTests = { _, method, _ ->
+        check(method == "approval.resolve")
+        unifiedResolve(applied = false, status = "denied", decision = "deny")
+      }
+
+      runtime.resolveExecApproval("approval-1", "allow-once")
+      waitUntil { runtime.execApprovals.value.map { it.id } == listOf("approval-2") }
+      assertEquals("A prior response already denied this approval.", runtime.execApprovalsNotice.value?.message)
+
+      val refreshMethods = mutableListOf<String>()
+      runtime.gatewayDataRequestOverrideForTests = { _, method, _ ->
+        refreshMethods += method
+        when (method) {
+          "exec.approval.list" ->
+            """[{"id":"approval-2","createdAtMs":101,"expiresAtMs":4000000000000}]"""
+          "approval.get" -> unifiedGet(status = "pending", decision = null, id = "approval-2")
+          else -> error("unexpected method $method")
+        }
+      }
+      runtime.refreshExecApprovals()
+      waitUntil { refreshMethods.contains("approval.get") && !runtime.execApprovalsRefreshing.value }
+      assertEquals(listOf("approval-2"), runtime.execApprovals.value.map { it.id })
+
+      // A refresh must not wipe an unacknowledged losing outcome; only the user (or a
+      // replacement terminal notice) clears the banner.
+      assertEquals("A prior response already denied this approval.", runtime.execApprovalsNotice.value?.message)
+      assertEquals("approval-1", runtime.execApprovalsNotice.value?.approvalId)
+
+      runtime.dismissExecApprovalsNotice()
+      assertNull(runtime.execApprovalsNotice.value)
+    }
+
+  @Test
   fun oldGatewayUsesOnlyShippedExecMethods() =
     runBlocking {
       val runtime = createTestRuntime()
