@@ -120,8 +120,16 @@ function createRuntimeApprovalSessionAudienceSources(
   return {
     canonicalizeSessionKey: (sessionKey, relativeToSessionKey) => {
       if (!relativeToSessionKey) {
-        const canonical = resolveSessionStoreKey({ cfg, sessionKey });
-        const ownerAgentId = sourceAgentId ?? resolveDefaultAgentId(cfg);
+        const ownerAgentId = normalizeAgentId(sourceAgentId ?? resolveDefaultAgentId(cfg));
+        // Unscoped source aliases (e.g. "child", "main") must resolve against
+        // the raising agent's store, not the default agent's, or multi-agent
+        // audiences route to the wrong session streams.
+        const lowered = sessionKey.trim().toLowerCase();
+        const scoped =
+          parseAgentSessionKey(sessionKey) || lowered === "global" || lowered === "unknown"
+            ? sessionKey
+            : `agent:${ownerAgentId}:${sessionKey}`;
+        const canonical = resolveSessionStoreKey({ cfg, sessionKey: scoped });
         // Storage uses the bare global sentinel, while live session streams are
         // agent-scoped so one agent cannot receive another's global events.
         return resolveApprovalSourceStreamKey(canonical, ownerAgentId);

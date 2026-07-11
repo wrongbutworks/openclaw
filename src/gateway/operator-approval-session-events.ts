@@ -77,12 +77,18 @@ export function createOperatorApprovalSessionEventRuntime(params: {
     if (!approval || event.record.audienceSessionKeys.length === 0) {
       return;
     }
-    // Storage keeps the bare "global" sentinel, but subscribers only know the
-    // agent-scoped stream keys used for audiences; publish the same form so
-    // parents can correlate the event with a stream key they subscribed to.
-    const sourceStreamKey = event.record.source.sessionKey
-      ? resolveApprovalSourceStreamKey(event.record.source.sessionKey, event.record.source.agentId)
-      : null;
+    // The audience walk seeds the fully canonicalized source stream key as its
+    // first entry; publish that exact form so parents can correlate the event
+    // with a stream key they subscribed to. Raw source aliases (bare "global",
+    // "main", unscoped child keys) never reach subscribers.
+    const sourceStreamKey =
+      event.record.audienceSessionKeys[0] ??
+      (event.record.source.sessionKey
+        ? resolveApprovalSourceStreamKey(
+            event.record.source.sessionKey,
+            event.record.source.agentId,
+          )
+        : null);
     for (const sessionKey of event.record.audienceSessionKeys) {
       const recipients = authorizedRecipients(sessionKey, event.record);
       if (recipients.size === 0) {

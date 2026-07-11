@@ -1,9 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  resolveApprovalSessionAudience,
   resolveApprovalSessionAudienceFromSources,
   resolveApprovalSourceStreamKey,
   type ApprovalSessionAudienceSources,
 } from "./approval-session-audience.js";
+
+vi.mock("../config/io.js", () => ({
+  getRuntimeConfig: () => ({}),
+}));
+vi.mock("../agents/subagent-registry-read.js", () => ({
+  buildLatestSubagentRunReadIndex: () => ({ getLatestSubagentRun: () => undefined }),
+}));
+vi.mock("../config/sessions/session-accessor.js", () => ({
+  loadSessionEntry: () => undefined,
+}));
 
 type GraphNode = {
   registry?: {
@@ -145,5 +156,21 @@ describe("resolveApprovalSessionAudienceFromSources", () => {
     expect(audience).toHaveLength(64);
     expect(audience[0]).toBe("session-0");
     expect(audience.at(-1)).toBe("session-63");
+  });
+});
+
+describe("resolveApprovalSessionAudience runtime scoping", () => {
+  it("scopes unscoped source aliases to the raising agent", () => {
+    expect(resolveApprovalSessionAudience("child", "work")).toEqual(["agent:work:child"]);
+  });
+
+  it("scopes a global source to the raising agent stream", () => {
+    expect(resolveApprovalSessionAudience("global", "work")).toEqual(["agent:work:global"]);
+  });
+
+  it("keeps explicit cross-agent source keys exact", () => {
+    expect(resolveApprovalSessionAudience("agent:other:child", "work")).toEqual([
+      "agent:other:child",
+    ]);
   });
 });

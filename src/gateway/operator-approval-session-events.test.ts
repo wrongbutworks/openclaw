@@ -321,6 +321,30 @@ describe("operator approval session events", () => {
     );
   });
 
+  it("publishes the canonical audience source key for unscoped session aliases", () => {
+    const client = createClient({ connId: "admin", scopes: ["operator.admin"] });
+    const { broadcastToConnIds, runtime, subscribers } = createRuntime({ clients: [client] });
+    subscribers.subscribe("admin", "agent:work:child", { includeApprovals: true });
+
+    // The persisted source may be a raw unscoped alias; subscribers must see
+    // the canonical stream key the audience walk seeded first.
+    const pending = createPendingRecord({
+      sourceSessionKey: "child",
+      audienceSessionKeys: ["agent:work:child", "agent:work:parent"],
+    });
+    runtime.publish({ phase: "pending", record: pending });
+
+    expect(broadcastToConnIds).toHaveBeenCalledWith(
+      "session.approval",
+      expect.objectContaining({
+        sessionKey: "agent:work:child",
+        sourceSessionKey: "agent:work:child",
+        phase: "pending",
+      }),
+      new Set(["admin"]),
+    );
+  });
+
   it("publishes terminal state and rejects lifecycle phases inconsistent with durable status", () => {
     const client = createClient({ connId: "admin", scopes: ["operator.admin"] });
     const { broadcastToConnIds, runtime, subscribers } = createRuntime({ clients: [client] });
