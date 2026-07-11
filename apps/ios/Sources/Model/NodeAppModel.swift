@@ -5377,7 +5377,9 @@ extension NodeAppModel {
         self.terminalExecApprovalKeyOrder.removeAll()
         self.resettableWatchResolutionAttempts.removeAll()
         self.activeExecApprovalResolutionAttempts.removeAll()
-        self.execApprovalUncertainties.removeAll()
+        // Uncertainties are owner-scoped durable records of lost write outcomes, not
+        // gateway-local UI. They must survive a target switch so returning to the owner
+        // keeps that approval frozen until approval.get classifies it canonically.
         let requestedPushes = self.pendingWatchExecApprovalRecoveryPushes
         self.pendingWatchExecApprovalRecoveryPushes.removeAll()
         let resolvedPushes = self.pendingExecApprovalResolvedPushes
@@ -6874,6 +6876,15 @@ extension NodeAppModel {
             expectedGatewayStableID: prompt.gatewayStableID,
             sourceReason: "watch_resolve",
             resolutionAttempt: resolutionAttempt)
+        if case let .uncertain(message) = outcome {
+            // Same contract as the phone path: a gateway switch invalidates the attempt,
+            // but the owner-scoped uncertainty + readback record must persist so the
+            // delivered Watch decision is never silently dropped without a trace.
+            self.markExecApprovalResolutionUncertain(
+                approvalID: approvalID,
+                gatewayStableID: prompt.gatewayStableID,
+                message: message)
+        }
         guard self.isActiveExecApprovalResolutionAttempt(resolutionAttempt) else { return true }
         switch outcome {
         case .resolved, .stale:
@@ -6892,11 +6903,8 @@ extension NodeAppModel {
                         heldAttemptID: routedEvent.replyId))
             }
             return true
-        case let .uncertain(message):
-            self.markExecApprovalResolutionUncertain(
-                approvalID: approvalID,
-                gatewayStableID: prompt.gatewayStableID,
-                message: message)
+        case .uncertain:
+            // Recorded above, before the attempt gate.
             return true
         case let .failed(message):
             self.markWatchResolutionAttemptResettable(routedEvent)
@@ -8402,13 +8410,17 @@ extension NodeAppModel {
             decision: decision,
             expectedGatewayStableID: prompt.gatewayStableID,
             resolutionAttempt: resolutionAttempt)
-        guard self.isActiveExecApprovalResolutionAttempt(resolutionAttempt) else { return }
         if case let .uncertain(message) = outcome {
+            // A gateway switch invalidates this attempt mid-flight, but a lost write
+            // outcome is owner-scoped durable state: record it before the attempt gate
+            // or switching back would offer a fresh actionable card for a decision that
+            // may already be applied. UI mutations stay keyed to the exact owner inside.
             self.markExecApprovalResolutionUncertain(
                 approvalID: prompt.id,
                 gatewayStableID: prompt.gatewayStableID,
                 message: message)
         }
+        guard self.isActiveExecApprovalResolutionAttempt(resolutionAttempt) else { return }
         guard self.pendingExecApprovalPrompt.map({ Self.approvalIDsMatch($0.id, prompt.id) }) == true,
               GatewayStableIdentifier.matches(
                   self.pendingExecApprovalPrompt?.gatewayStableID,
@@ -8603,6 +8615,8 @@ extension NodeAppModel {
             legacyResolve: legacyResolve)
     }
 
+    // Legacy exec.approval.* fallback serves shipped Gateway v4 peers; remove when the
+    // minimum supported gateway advertises approval.get/approval.resolve.
     private nonisolated static func selectExecApprovalRPCFamily(
         unifiedGet: Bool?,
         unifiedResolve: Bool?,
