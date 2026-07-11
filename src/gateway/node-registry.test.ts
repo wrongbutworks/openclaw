@@ -31,7 +31,6 @@ function makeClient(
     version?: string;
     caps?: string[];
     commands?: string[];
-    nodePluginTools?: GatewayWsClient["connect"]["nodePluginTools"];
     permissions?: Record<string, boolean>;
     declaredCaps?: string[];
     declaredCommands?: string[];
@@ -71,7 +70,6 @@ function makeClient(
       },
       caps: opts.caps ?? [],
       commands: opts.commands ?? [],
-      nodePluginTools: opts.nodePluginTools,
       permissions: opts.permissions,
       declaredCaps: opts.declaredCaps,
       declaredCommands: opts.declaredCommands,
@@ -142,6 +140,14 @@ function registerNode(registry: NodeRegistry, opts: Parameters<typeof makeClient
   const frames: string[] = [];
   registry.register(makeClient("conn-1", "node-1", frames, opts), {});
   return frames;
+}
+
+function publishNodePluginTools(
+  registry: NodeRegistry,
+  tools: Parameters<NodeRegistry["updateNodePluginTools"]>[2],
+  connId = "conn-1",
+) {
+  return registry.updateNodePluginTools("node-1", connId, tools);
 }
 
 function registerLinuxNode(registry: NodeRegistry) {
@@ -741,23 +747,23 @@ describe("gateway/node-registry", () => {
     const registry = createTestNodeRegistry();
     const client = makeClient("conn-1", "node-1", [], {
       commands: ["demo.echo"],
-      nodePluginTools: [
-        {
-          pluginId: "demo",
-          name: "demo_echo",
-          description: "Echo through the node",
-          command: "demo.echo",
-        },
-        {
-          pluginId: "demo",
-          name: "demo_blocked",
-          description: "Blocked command",
-          command: "demo.blocked",
-        },
-      ],
     });
 
     const session = registry.register(client, {});
+    publishNodePluginTools(registry, [
+      {
+        pluginId: "demo",
+        name: "demo_echo",
+        description: "Echo through the node",
+        command: "demo.echo",
+      },
+      {
+        pluginId: "demo",
+        name: "demo_blocked",
+        description: "Blocked command",
+        command: "demo.blocked",
+      },
+    ]);
 
     expect(session.nodePluginTools.map((tool) => tool.name)).toEqual(["demo_echo"]);
     expect(listConnectedNodePluginTools().map((entry) => entry.descriptor.name)).toEqual([
@@ -782,17 +788,17 @@ describe("gateway/node-registry", () => {
     const registry = createTestNodeRegistry();
     const client = makeClient("conn-1", "node-1", [], {
       commands: ["demo.dangerous"],
-      nodePluginTools: [
-        {
-          pluginId: "demo",
-          name: "demo_dangerous",
-          description: "Dangerous command",
-          command: "demo.dangerous",
-        },
-      ],
     });
 
     const session = registry.register(client, {});
+    publishNodePluginTools(registry, [
+      {
+        pluginId: "demo",
+        name: "demo_dangerous",
+        description: "Dangerous command",
+        command: "demo.dangerous",
+      },
+    ]);
 
     expect(session.nodePluginTools.map((tool) => tool.name)).toEqual(["demo_dangerous"]);
     expect(listConnectedNodePluginTools().map((entry) => entry.descriptor.name)).toEqual([
@@ -805,23 +811,23 @@ describe("gateway/node-registry", () => {
     const registry = createTestNodeRegistry();
     const client = makeClient("conn-1", "node-1", [], {
       commands: ["demo.echo"],
-      nodePluginTools: [
-        {
-          pluginId: "demo",
-          name: "demo.echo",
-          description: "Invalid provider tool name",
-          command: "demo.echo",
-        },
-        {
-          pluginId: "demo",
-          name: "demo_echo",
-          description: "Valid provider tool name",
-          command: "demo.echo",
-        },
-      ],
     });
 
     const session = registry.register(client, {});
+    publishNodePluginTools(registry, [
+      {
+        pluginId: "demo",
+        name: "demo.echo",
+        description: "Invalid provider tool name",
+        command: "demo.echo",
+      },
+      {
+        pluginId: "demo",
+        name: "demo_echo",
+        description: "Valid provider tool name",
+        command: "demo.echo",
+      },
+    ]);
 
     expect(session.nodePluginTools.map((tool) => tool.name)).toEqual(["demo_echo"]);
     expect(listConnectedNodePluginTools().map((entry) => entry.descriptor.name)).toEqual([
@@ -829,24 +835,32 @@ describe("gateway/node-registry", () => {
     ]);
   });
 
-  it("drops node-hosted plugin tools that do not match a plugin registration", () => {
+  it("accepts unregistered descriptors only inside the approved command surface", () => {
     const registry = createTestNodeRegistry();
     const client = makeClient("conn-1", "node-1", [], {
       commands: ["system.run"],
-      nodePluginTools: [
-        {
-          pluginId: "demo",
-          name: "demo_echo",
-          description: "Spoofed command",
-          command: "system.run",
-        },
-      ],
     });
 
     const session = registry.register(client, {});
+    publishNodePluginTools(registry, [
+      {
+        pluginId: "demo",
+        name: "demo_echo",
+        description: "Allowed command",
+        command: "system.run",
+      },
+      {
+        pluginId: "demo",
+        name: "demo_blocked",
+        description: "Blocked command",
+        command: "demo.blocked",
+      },
+    ]);
 
-    expect(session.nodePluginTools).toEqual([]);
-    expect(listConnectedNodePluginTools()).toEqual([]);
+    expect(session.nodePluginTools.map((tool) => tool.name)).toEqual(["demo_echo"]);
+    expect(listConnectedNodePluginTools().map((entry) => entry.descriptor.name)).toEqual([
+      "demo_echo",
+    ]);
   });
 
   it("uses registry metadata for node-hosted plugin tool descriptors", () => {
@@ -862,21 +876,21 @@ describe("gateway/node-registry", () => {
     const registry = createTestNodeRegistry();
     const client = makeClient("conn-1", "node-1", [], {
       commands: ["demo.echo"],
-      nodePluginTools: [
-        {
-          pluginId: "demo",
-          name: "demo_echo",
-          description: "Injected node description",
-          parameters: {
-            type: "object",
-            properties: { secret: { type: "string" } },
-          },
-          command: "demo.echo",
-        },
-      ],
     });
 
     const session = registry.register(client, {});
+    publishNodePluginTools(registry, [
+      {
+        pluginId: "demo",
+        name: "demo_echo",
+        description: "Injected node description",
+        parameters: {
+          type: "object",
+          properties: { secret: { type: "string" } },
+        },
+        command: "demo.echo",
+      },
+    ]);
 
     expect(session.nodePluginTools).toEqual([
       {
@@ -898,17 +912,17 @@ describe("gateway/node-registry", () => {
     const client = makeClient("conn-1", "node-1", [], {
       commands: [],
       declaredCommands: ["demo.echo"],
-      nodePluginTools: [
-        {
-          pluginId: "demo",
-          name: "demo_echo",
-          description: "Echo through the node",
-          command: "demo.echo",
-        },
-      ],
     });
 
     const session = registry.register(client, {});
+    publishNodePluginTools(registry, [
+      {
+        pluginId: "demo",
+        name: "demo_echo",
+        description: "Echo through the node",
+        command: "demo.echo",
+      },
+    ]);
     expect(session.nodePluginTools).toEqual([]);
     expect(listConnectedNodePluginTools()).toEqual([]);
 
@@ -923,32 +937,56 @@ describe("gateway/node-registry", () => {
     ]);
   });
 
-  it("refreshes node-hosted plugin tools after plugin descriptors load", () => {
+  it("enriches published node tools after matching plugin descriptors load", () => {
     const registry = createTestNodeRegistry();
     registry.register(
       makeClient("conn-1", "node-1", [], {
         commands: ["demo.echo"],
-        nodePluginTools: [
-          {
-            pluginId: "demo",
-            name: "demo_echo",
-            description: "Echo through the node",
-            command: "demo.echo",
-          },
-        ],
+      }),
+      {},
+    );
+    publishNodePluginTools(registry, [
+      {
+        pluginId: "demo",
+        name: "demo_echo",
+        description: "Published description",
+        command: "demo.echo",
+      },
+    ]);
+
+    expect(registry.get("node-1")?.nodePluginTools[0]?.description).toBe("Published description");
+
+    registerDemoNodePluginTool({
+      name: "demo_echo",
+      command: "demo.echo",
+      description: "Registered description",
+    });
+    registry.refreshNodePluginTools();
+
+    expect(registry.get("node-1")?.nodePluginTools[0]?.description).toBe("Registered description");
+  });
+
+  it("ignores published node tools when gateway publication is disabled", () => {
+    const registry = new NodeRegistry({ nodePluginToolsEnabled: false });
+    registry.register(
+      makeClient("conn-1", "node-1", [], {
+        commands: ["demo.echo"],
       }),
       {},
     );
 
-    expect(registry.get("node-1")?.nodePluginTools).toEqual([]);
-
-    registerDemoNodePluginTool({ name: "demo_echo", command: "demo.echo" });
-    registry.refreshNodePluginTools();
-
-    expect(registry.get("node-1")?.nodePluginTools.map((tool) => tool.name)).toEqual(["demo_echo"]);
-    expect(listConnectedNodePluginTools().map((entry) => entry.descriptor.name)).toEqual([
-      "demo_echo",
+    const updated = publishNodePluginTools(registry, [
+      {
+        pluginId: "demo",
+        name: "demo_echo",
+        description: "Echo through the node",
+        command: "demo.echo",
+      },
     ]);
+
+    expect(updated?.declaredNodePluginTools).toEqual([]);
+    expect(updated?.nodePluginTools).toEqual([]);
+    expect(listConnectedNodePluginTools()).toEqual([]);
   });
 
   it("ignores node plugin tool updates from stale connections", () => {

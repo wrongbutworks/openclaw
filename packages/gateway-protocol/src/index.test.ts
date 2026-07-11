@@ -87,6 +87,22 @@ describe("lazy protocol validators", () => {
     expect(validateConnectParams.errors).toBeNull();
   });
 
+  it("rejects the removed connect-time node plugin tools surface", () => {
+    expect(
+      validateConnectParams({
+        minProtocol: 1,
+        maxProtocol: 1,
+        client: {
+          id: "test",
+          version: "1.0.0",
+          platform: "test",
+          mode: "test",
+        },
+        nodePluginTools: [],
+      }),
+    ).toBe(false);
+  });
+
   it("rejects provider-unsafe node plugin tool names", () => {
     expect(
       validateNodePluginToolsUpdateParams({

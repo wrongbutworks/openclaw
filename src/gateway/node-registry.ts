@@ -119,6 +119,7 @@ export type NodeRegistryOptions = {
   listRegisteredNodePluginToolCommands?:
     | (() => readonly RegisteredNodePluginToolCommand[] | undefined)
     | undefined;
+  nodePluginToolsEnabled?: boolean;
 };
 
 /** Serialize an event payload once so fanout can reuse the same JSON string. */
@@ -214,11 +215,13 @@ export class NodeRegistry {
   constructor(private readonly options: NodeRegistryOptions = {}) {}
 
   private normalizePluginToolDescriptors(params: {
+    nodeId: string;
     tools?: readonly NodePluginToolDescriptor[];
-    allowedCommands?: readonly string[];
+    allowedCommands: readonly string[];
   }): NodePluginToolDescriptor[] {
     return normalizeNodePluginToolDescriptors({
       ...params,
+      enabled: this.options.nodePluginToolsEnabled,
       registeredDescriptors: createRegisteredNodePluginToolDescriptorMap(
         this.options.listRegisteredNodePluginToolCommands?.(),
       ),
@@ -227,11 +230,11 @@ export class NodeRegistry {
 
   private replaceEffectiveNodePluginTools(node: NodeSession): void {
     const nodePluginTools = this.normalizePluginToolDescriptors({
+      nodeId: node.nodeId,
       tools: node.declaredNodePluginTools,
       allowedCommands: node.commands,
     });
     node.nodePluginTools = nodePluginTools;
-    node.client.connect.nodePluginTools = nodePluginTools;
     replaceConnectedNodePluginTools({
       nodeId: node.nodeId,
       displayName: node.displayName,
@@ -306,13 +309,8 @@ export class NodeRegistry {
       typeof (connect as { pathEnv?: string }).pathEnv === "string"
         ? (connect as { pathEnv?: string }).pathEnv
         : undefined;
-    const declaredNodePluginTools = Array.isArray(connect.nodePluginTools)
-      ? [...connect.nodePluginTools]
-      : [];
-    const nodePluginTools = this.normalizePluginToolDescriptors({
-      tools: declaredNodePluginTools,
-      allowedCommands: commands,
-    });
+    const declaredNodePluginTools: NodePluginToolDescriptor[] = [];
+    const nodePluginTools: NodePluginToolDescriptor[] = [];
     const session: NodeSession = {
       nodeId,
       connId: client.connId,
@@ -499,7 +497,7 @@ export class NodeRegistry {
     if (!node || node.connId !== connId) {
       return null;
     }
-    node.declaredNodePluginTools = [...tools];
+    node.declaredNodePluginTools = this.options.nodePluginToolsEnabled === false ? [] : [...tools];
     this.replaceEffectiveNodePluginTools(node);
     return node;
   }

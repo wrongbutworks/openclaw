@@ -275,6 +275,10 @@ Node-related settings live under `gateway.nodes` and `tools.exec`:
         // node pairing on an exact device-key match read back over SSH.
         sshVerify: true,
       },
+      // Trust agent-visible plugin tools published by paired nodes (default: true).
+      pluginTools: {
+        enabled: true,
+      },
       // Opt into dangerous/privacy-heavy node commands (camera.snap, etc.).
       allowCommands: ["camera.snap", "screen.record"],
       // Block exact command names even if defaults or allowCommands include them.
@@ -294,7 +298,7 @@ Node-related settings live under `gateway.nodes` and `tools.exec`:
 }
 ```
 
-Use exact node command names. `denyCommands` removes a command even when a platform default or `allowCommands` entry would otherwise allow it. See [Gateway configuration reference](/gateway/configuration-reference#gateway) for gateway node pairing and command-policy field details.
+Use exact node command names. `denyCommands` removes a command even when a platform default or `allowCommands` entry would otherwise allow it. Paired nodes may publish agent-visible plugin tool descriptors by default, but each descriptor's command must still be in the node's approved command surface. Set `gateway.nodes.pluginTools.enabled: false` to ignore all such descriptors. See [Gateway configuration reference](/gateway/configuration-reference#gateway) for gateway node pairing and command-policy field details.
 
 Per-agent exec node override:
 

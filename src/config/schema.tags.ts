@@ -59,6 +59,7 @@ const TAG_OVERRIDES: Record<string, ConfigTag[]> = {
   "gateway.controlUi.allowInsecureAuth": ["security", "access", "network", "advanced"],
   "gateway.nodes.pairing.autoApproveCidrs": ["security", "access", "network", "advanced"],
   "gateway.nodes.pairing.sshVerify": ["security", "access", "network", "advanced"],
+  "gateway.nodes.pluginTools.enabled": ["tools", "security", "access", "network", "advanced"],
   "proxy.tls.caFile": ["security", "network", "storage", "advanced"],
   "tools.exec.applyPatch.workspaceOnly": ["tools", "security", "access", "advanced"],
   "tools.exec.mode": ["tools", "security", "access"],

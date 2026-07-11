@@ -18,9 +18,11 @@ import { hasConnectedTalkNode } from "./server-talk-nodes.js";
 export function createGatewayNodeSessionRuntime(params: {
   broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
   listRegisteredNodePluginToolCommands?: NodeRegistryOptions["listRegisteredNodePluginToolCommands"];
+  nodePluginToolsEnabled?: boolean;
 }) {
   const nodeRegistry = new NodeRegistry({
     listRegisteredNodePluginToolCommands: params.listRegisteredNodePluginToolCommands,
+    nodePluginToolsEnabled: params.nodePluginToolsEnabled,
   });
   const nodePresenceTimers = new Map<string, ReturnType<typeof setInterval>>();
   const nodeSubscriptions = createNodeSubscriptionManager();

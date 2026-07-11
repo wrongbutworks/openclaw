@@ -73,21 +73,29 @@ function describeNodeToolLocation(params: {
 }
 
 function sanitizeToolNameFragment(value: string): string {
-  return value
+  const fragment = value
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_]+/g, "_")
     .replace(/^_+|_+$/g, "")
     .slice(0, 32);
+  if (!fragment) {
+    return "node";
+  }
+  return /^[a-z]/.test(fragment) ? fragment : `node_${fragment}`.slice(0, 32);
 }
 
 function isProviderSafeToolName(value: string): boolean {
   return NODE_PLUGIN_TOOL_NAME_RE.test(value);
 }
 
-function appendToolNameSuffix(baseName: string, suffix: string): string {
-  const maxBaseLength = Math.max(1, NODE_PLUGIN_TOOL_NAME_MAX_LENGTH - suffix.length);
-  return `${baseName.slice(0, maxBaseLength)}${suffix}`;
+function prependToolNameFragment(baseName: string, fragment: string, suffix: string): string {
+  const prefix = `${fragment}_`;
+  const maxBaseLength = Math.max(
+    1,
+    NODE_PLUGIN_TOOL_NAME_MAX_LENGTH - prefix.length - suffix.length,
+  );
+  return `${prefix}${baseName.slice(0, maxBaseLength)}${suffix}`;
 }
 
 function resolveUniqueToolName(params: {
@@ -101,11 +109,9 @@ function resolveUniqueToolName(params: {
     return params.baseName;
   }
   const nodeFragment = sanitizeToolNameFragment(params.nodeId);
-  const nodeSuffix = nodeFragment ? `_${nodeFragment}` : "_node";
-  const stem = appendToolNameSuffix(params.baseName, nodeSuffix);
   for (let index = 0; index < 100; index += 1) {
     const suffix = index === 0 ? "" : `_${index + 1}`;
-    const candidate = suffix ? appendToolNameSuffix(stem, suffix) : stem;
+    const candidate = prependToolNameFragment(params.baseName, nodeFragment, suffix);
     const normalized = normalizeToolName(candidate);
     if (
       isProviderSafeToolName(candidate) &&

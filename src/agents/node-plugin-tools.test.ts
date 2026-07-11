@@ -90,7 +90,7 @@ describe("createNodePluginTools", () => {
       createNodePluginTools({ existingToolNames: new Set(["remote_echo"]) }).map(
         (tool) => tool.name,
       ),
-    ).toEqual(["remote_echo_node_1"]);
+    ).toEqual(["node_1_remote_echo"]);
   });
 
   it("disambiguates matching tool names from different nodes", async () => {
@@ -125,7 +125,7 @@ describe("createNodePluginTools", () => {
     const tools = createNodePluginTools({});
     const result = await tools[1].execute("call-2", { text: "ping" });
 
-    expect(tools.map((tool) => tool.name)).toEqual(["remote_echo_node_a", "remote_echo_node_b"]);
+    expect(tools.map((tool) => tool.name)).toEqual(["node_a_remote_echo", "node_b_remote_echo"]);
     expect(callGatewayTool).toHaveBeenCalledWith(
       "node.invoke",
       {},
@@ -160,14 +160,55 @@ describe("createNodePluginTools", () => {
 
     expect(
       createNodePluginTools({
-        toolAllowlist: ["remote_echo_node_b"],
+        toolAllowlist: ["node_b_remote_echo"],
       }).map((tool) => tool.name),
-    ).toEqual(["remote_echo_node_b"]);
+    ).toEqual(["node_b_remote_echo"]);
     expect(
       createNodePluginTools({
-        toolDenylist: ["remote_echo_node_b"],
+        toolDenylist: ["node_b_remote_echo"],
       }).map((tool) => tool.name),
-    ).toEqual(["remote_echo_node_a"]);
+    ).toEqual(["node_a_remote_echo"]);
+  });
+
+  it("keeps numeric node fragments provider-safe", () => {
+    replaceConnectedNodePluginTools({
+      nodeId: "123",
+      tools: [
+        {
+          pluginId: "remote-demo",
+          name: "remote_echo",
+          description: "Echo through a remote node",
+          command: "remote.echo",
+        },
+      ],
+    });
+
+    expect(
+      createNodePluginTools({ existingToolNames: new Set(["remote_echo"]) }).map(
+        (tool) => tool.name,
+      ),
+    ).toEqual(["node_123_remote_echo"]);
+  });
+
+  it("keeps numeric disambiguation when node fragments collide", () => {
+    for (const nodeId of ["node-a", "node_a"]) {
+      replaceConnectedNodePluginTools({
+        nodeId,
+        tools: [
+          {
+            pluginId: "remote-demo",
+            name: "remote_echo",
+            description: "Echo through a remote node",
+            command: "remote.echo",
+          },
+        ],
+      });
+    }
+
+    expect(createNodePluginTools({}).map((tool) => tool.name)).toEqual([
+      "node_a_remote_echo",
+      "node_a_remote_echo_2",
+    ]);
   });
 
   it("keeps disambiguated node tool names provider-safe", () => {
@@ -220,5 +261,4 @@ describe("createNodePluginTools", () => {
     ).toEqual(["remote_echo"]);
     expect(createNodePluginTools({ toolAllowlist: ["other-plugin"] })).toEqual([]);
   });
-
 });

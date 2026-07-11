@@ -965,6 +965,7 @@ export async function startGatewayServer(
   } = createGatewayNodeSessionRuntime({
     broadcast,
     listRegisteredNodePluginToolCommands: () => pluginRegistry.nodeHostCommands,
+    nodePluginToolsEnabled: cfgAtStart.gateway?.nodes?.pluginTools?.enabled !== false,
   });
   const { createWatchNodeHttpRuntime } = await import("./watch-node-http.js");
   const watchNodeHttpRuntime = createWatchNodeHttpRuntime({

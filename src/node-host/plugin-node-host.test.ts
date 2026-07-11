@@ -81,7 +81,7 @@ describe("plugin node-host registry", () => {
     ];
     setActivePluginRegistry(registry);
 
-    expect(listRegisteredNodeHostCapsAndCommands().nodePluginTools).toEqual([
+    expect(listRegisteredNodeHostCapsAndCommands(availabilityContext).nodePluginTools).toEqual([
       {
         pluginId: "browser",
         name: "browser_inspect",
@@ -115,7 +115,7 @@ describe("plugin node-host registry", () => {
     ];
     setActivePluginRegistry(registry);
 
-    expect(listRegisteredNodeHostCapsAndCommands()).toEqual({
+    expect(listRegisteredNodeHostCapsAndCommands(availabilityContext)).toEqual({
       caps: ["browser"],
       commands: ["browser.proxy"],
       nodePluginTools: [],

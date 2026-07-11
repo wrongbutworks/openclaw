@@ -1414,6 +1414,12 @@ export const OpenClawSchema = z
               })
               .strict()
               .optional(),
+            pluginTools: z
+              .object({
+                enabled: z.boolean().optional(),
+              })
+              .strict()
+              .optional(),
             allowCommands: z.array(z.string()).optional(),
             denyCommands: z.array(z.string()).optional(),
           })

@@ -76,7 +76,6 @@ public struct ConnectParams: Codable, Sendable {
     public let client: [String: AnyCodable]
     public let caps: [String]?
     public let commands: [String]?
-    public let nodeplugintools: [NodePluginToolDescriptor]?
     public let permissions: [String: AnyCodable]?
     public let pathenv: String?
     public let role: String?
@@ -92,7 +91,6 @@ public struct ConnectParams: Codable, Sendable {
         client: [String: AnyCodable],
         caps: [String]? = nil,
         commands: [String]? = nil,
-        nodeplugintools: [NodePluginToolDescriptor]? = nil,
         permissions: [String: AnyCodable]? = nil,
         pathenv: String? = nil,
         role: String? = nil,
@@ -107,7 +105,6 @@ public struct ConnectParams: Codable, Sendable {
         self.client = client
         self.caps = caps
         self.commands = commands
-        self.nodeplugintools = nodeplugintools
         self.permissions = permissions
         self.pathenv = pathenv
         self.role = role
@@ -124,7 +121,6 @@ public struct ConnectParams: Codable, Sendable {
         case client
         case caps
         case commands
-        case nodeplugintools = "nodePluginTools"
         case permissions
         case pathenv = "pathEnv"
         case role
