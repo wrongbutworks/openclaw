@@ -1413,7 +1413,9 @@ extension RootTabsSourceGuardTests {
         #expect(resolution.contains("defer { self.finishExecApprovalResolutionAttempt(resolutionAttempt) }"))
         #expect(resolution.contains("guard self.isActiveExecApprovalResolutionAttempt(resolutionAttempt)"))
         #expect(presentation.contains("let preserveActiveResolution"))
-        #expect(presentation.contains("if !preserveActiveResolution"))
+        // Re-presenting while the write fence is held must render as resolving.
+        #expect(presentation.contains("} else if preserveActiveResolution {"))
+        #expect(presentation.contains("self.pendingExecApprovalPromptResolving = true"))
     }
 
     @Test func `uncertain approval remains dismissible on modal and settings surfaces`() throws {

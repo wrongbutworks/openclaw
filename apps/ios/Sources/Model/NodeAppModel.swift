@@ -5376,7 +5376,10 @@ extension NodeAppModel {
         self.terminalExecApprovalKeys.removeAll()
         self.terminalExecApprovalKeyOrder.removeAll()
         self.resettableWatchResolutionAttempts.removeAll()
-        self.activeExecApprovalResolutionAttempts.removeAll()
+        // In-flight resolution attempts are owner-scoped write fences keyed by
+        // (approvalID, gatewayStableID). They must survive a target switch so returning
+        // to the owner cannot double-submit while the original write outcome is unknown;
+        // completion defers and terminal cleanup remove them per key.
         // Uncertainties are owner-scoped durable records of lost write outcomes, not
         // gateway-local UI. They must survive a target switch so returning to the owner
         // keeps that approval frozen until approval.get classifies it canonically.
@@ -7881,7 +7884,12 @@ extension NodeAppModel {
             self.pendingExecApprovalPromptResolving = true
             self.pendingExecApprovalPromptErrorText = uncertainResolutionMessage
             self.pendingExecApprovalPromptOutcome = nil
-        } else if !preserveActiveResolution {
+        } else if preserveActiveResolution {
+            // Re-presenting while the owner write fence is held (e.g. after a gateway
+            // round-trip cleared the surface flags) must render as resolving, or the
+            // card would look actionable while the fence rejects new attempts.
+            self.pendingExecApprovalPromptResolving = true
+        } else {
             self.pendingExecApprovalPromptResolving = false
             self.pendingExecApprovalPromptErrorText = nil
             self.pendingExecApprovalPromptOutcome = nil
