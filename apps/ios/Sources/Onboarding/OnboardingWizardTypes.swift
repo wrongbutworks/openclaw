@@ -43,8 +43,8 @@ enum OnboardingConnectPhase {
     case ready
 }
 
-// Typed connection attempt replaces string sentinels ("manual", "retry", ...) so
-// gateway attempts compare by byte-exact stable-ID key, never trimmed strings.
+/// Typed connection attempt replaces string sentinels ("manual", "retry", ...) so
+/// gateway attempts compare by byte-exact stable-ID key, never trimmed strings.
 enum OnboardingGatewayConnectionAttempt: Equatable {
     case gateway(GatewayStableIdentifier.Key)
     case manual

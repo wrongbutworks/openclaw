@@ -8615,8 +8615,8 @@ extension NodeAppModel {
             legacyResolve: legacyResolve)
     }
 
-    // Legacy exec.approval.* fallback serves shipped Gateway v4 peers; remove when the
-    // minimum supported gateway advertises approval.get/approval.resolve.
+    /// Legacy exec.approval.* fallback serves shipped Gateway v4 peers; remove when the
+    /// minimum supported gateway advertises approval.get/approval.resolve.
     private nonisolated static func selectExecApprovalRPCFamily(
         unifiedGet: Bool?,
         unifiedResolve: Bool?,
